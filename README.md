@@ -115,6 +115,7 @@ np.iinfo(np.int16).max
 * Number of samples vs FFT length - The length of the FFT merely interpolates the spectral frequency curve represented by the number of samples. But why are hey equal?
 * Given a fixed length recording, you can easily change your DFT bin frequency spacing by performing arbitrary length FFTs on the given data. But this will not change your spectral resolution, which is limited by the initial data length. Roughly speaking, the longer your total observation interval is, the better (finer) your spectral resolution will be (If you want any kind of spectral resolution at a given frequency then 1/T should be at least 10 times less than that frequency. e.g. if you care about 0.5 Hz you need to take at least 40 seconds of data)
 * Below are code and learnings for basic fft using numpy
+
 ```
 # sampling rate
 fs = 2000
