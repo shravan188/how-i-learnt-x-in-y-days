@@ -180,6 +180,7 @@ plt.show()
 ```
 
 * Below are code and learnings for basic sfft using librosa
+  
 ```
 import numpy as np
 import librosa
@@ -241,6 +242,7 @@ fig.colorbar(img, ax=ax, format="%+2.0f dB")
 #### Approach and Learnings
 
 * TO get an array of samples from audio data in pydub, we can use get_array_of_samples function, and convert that to numpy array using np.array
+  
 ```
 from pydub import AudioSegment
 import numpy as np
@@ -255,6 +257,7 @@ audio_data = audio_data / np.iinfo(audio_data.dtype).max
 S = np.abs(librosa.stft(audio_data))
 
 ```
+
 * Pyaudio : Python library to play and record audio. Basically provides python binding for PortAudio a cross platform audio i/o  library
 
 * Code to convert speech to text using Groq ASR/STT api 
