@@ -1,6 +1,5 @@
 ---
 title: AUDIO PROCESSING IN 8 DAYS
-layout: template
 filename: audio_processing.md
 --- 
 
