@@ -1,6 +1,11 @@
+---
+title: GEOSPATIAL PROCESSING USING PYTHON
+filename: geospatial_processing.md
+--- 
+
 # Geospatial Processing using Python
 
-### Goal : To learn geospatial concepts to find depth of a lake
+### Goal : To learn geospatial concepts to find volume of a lake
 
 ## Day 1
 
