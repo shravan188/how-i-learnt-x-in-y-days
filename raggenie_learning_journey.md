@@ -259,3 +259,90 @@ conn.close()
 9. https://stackoverflow.com/questions/17963348/how-to-disconnect-from-a-database-and-go-back-to-the-default-database-in-postgre
 10. https://stackoverflow.com/questions/31222377/what-are-docker-image-layers 
 11. Postgres sharding demo - https://github.com/smcclure17/sharding-demo/tree/main/sharding_demo
+12. https://stackoverflow.com/questions/23735149/what-is-the-difference-between-a-docker-image-and-a-container
+
+
+## Day 3
+
+### Duration : 2 hours
+
+### Learnings
+* In a function call **d means "treat the key-value pairs in the dictionary as additional named arguments to this function call."
+
+```
+dict = {"a":1, "b":2}
+
+def foo(a, b):
+    print(a, b)
+
+foo(**dict) # translates to foo(a=1, b=2)
+
+```
+
+* Cursor factory : helps us set the type of output we want from the executed query. The default output is a list of tuples but by using cursor factor we can change it to other data types like list of dictionaries (so that we can use column names as keys to access data)
+
+```
+## Normal cursor
+import psycopg2
+
+# Connect to an existing database with name test as user postgres
+conn = psycopg2.connect(dbname="test", user="postgres", password="password")
+
+# Open a cursor to perform database operations
+cur = conn.cursor()
+
+# Execute select command against database
+cur.execute("SELECT * FROM test;")
+
+# Show result of query execution
+print(cur.fetchall())
+
+# Close communication with database
+cur.close()
+conn.close()
+
+## Output is in form of list of tuples 
+## Output : [(1, 100, 'abc'), (2, 0, 'def')]
+## It looks like a list,  but it's a DictRow. This means that you can still use the column names as keys to access the data :
+## rows = cur.fetchall()
+## print([row['datname'] for row in rows])
+
+
+
+## Replace curr = conn.cursor() with cur = conn.cursor(cursor_factory=extras.RealDictCursor)
+## Output : [RealDictRow([('id', 1), ('num', 100), ('data', 'abc')]), RealDictRow([('id', 2), ('num', 0), ('data', 'def')])]
+
+## Replace curr = conn.cursor() with cur = conn.cursor(cursor_factory=extras.DictCursor)
+## Output : [[1, 100, 'abc'], [2, 0, 'def']]
+
+
+```
+
+* While configuring datasource (example doing an insert or delete) we need to do connection.commit() after cursor.execute(), but while fetching data, we do not need to commit, instead after cursor.execute() we do cursor.fetchall(). In short, remember to commit the transaction after executing INSERT or DELETE
+
+* select 1 from table will return the constant 1 for every row of the table that matches the WHERE clause, otherwise it returns nothing. It is used by some databases as a query to test a connection to see if it's alive.
+
+* EXISTS operator is used to test for the existence of any record in a subquery. It returns True if subquery returns 1 or more records
+
+```
+-- Get all supplier names who sell product with a price of 22
+SELECT SupplierName
+FROM Suppliers
+WHERE EXISTS (SELECT 1 FROM Products WHERE Products.SupplierID = Suppliers.supplierID AND Price = 22);
+
+```
+
+* To get table schema from postgres, we use INFORMATION_SCHEMA
+
+### Doubts
+1. Where are the plugins used? (all plugins are called in DSLoader class in loader.py (search for DSLoader class) -> in app/providers/container.py datasources attribute of Cntainer class uses DSLoader class (so search for Container class) -> found Container class in app/main.py where it is stored in config dictionary variable and then svc.update_datasource_documentations is called on that (search for update_datasource_documentations function) -> In app/services/connector.py, there is update_datasource_documentations function which class functions within the plugin like healthcheck, get data etc)
+2. Notice that ? placeholders are used to bind data to the query. Always use placeholders instead of string formatting to bind Python values to SQL statements, to avoid SQL injection attacks. But why does string formatting cause SQL injection?
+3. What is difference b/w exists and in in SQL?
+4. What is the difference b/w RealDict and NamedTupleCursor?
+
+### References
+1. https://stackoverflow.com/questions/21809112/what-does-tuple-and-dict-mean-in-python
+2. https://stackoverflow.com/questions/7171041/what-does-it-mean-select-1-from-table
+3. https://www.psycopg.org/docs/extras.html
+4. https://stackoverflow.com/questions/6739355/dictcursor-doesnt-seem-to-work-under-psycopg2
+5. https://stackoverflow.com/questions/50666600/psycopg2-extras-dictcursor-not-returning-dict-in-postgres
