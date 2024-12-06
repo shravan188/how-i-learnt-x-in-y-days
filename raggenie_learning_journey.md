@@ -346,3 +346,99 @@ WHERE EXISTS (SELECT 1 FROM Products WHERE Products.SupplierID = Suppliers.suppl
 3. https://www.psycopg.org/docs/extras.html
 4. https://stackoverflow.com/questions/6739355/dictcursor-doesnt-seem-to-work-under-psycopg2
 5. https://stackoverflow.com/questions/50666600/psycopg2-extras-dictcursor-not-returning-dict-in-postgres
+
+
+## Day 4
+### Duration : 2 hours
+
+### Learnings
+* Schema : Within a database/catalogue we have schemas. A schema is a collection of database objects, including tables, views, indexes and procedures, grouped together
+
+* Table : The primary component of a schema that stores data as rows and columns
+
+* Information_schema : This is a built in schema which is common to every PostgresSQL database. It is a collection of views, with each view containing information about the objects in the database. In short it contains the metadata of the database. Some of the important columns in the tables view of information_schema is :
+  * table_schema 
+  * table_name
+  * table_type (eg. base table, view)
+  * is_insertable_into 
+  Below are the steps to see information_schema schema using psql
+
+
+```
+# start docker container 
+docker start postgres-rg
+
+#
+docker ps 
+
+#
+docker exec -it postgres-rg bash
+
+# 
+psql -U postgres
+
+#
+select * from information_schema.tables;
+
+#
+Q
+
+# See
+select * from information_schema.tables where table_schema = 'public';
+
+
+```
+
+* To see information about columns, we have to use the information_schema.columns view. Some of the important columns in this view are
+
+  * table_catalog
+  * table_schema
+  * table_name
+  * column_name
+  * ordinal_position (i.e. position of the column relative to other columns)
+  * column_default
+  * is_nullable
+  * data_type
+  * character_maximum_length
+  * numeric_precision
+  * domain related columns (domain_catalog, domain_schema, domain_name) (business vs technical metadata)
+
+
+```
+#
+SELECT * FROM information_schema.columns WHERE table_name = 'test';
+
+#
+SELECT column_name, data_type, character_maximum_length FROM information_schema.columns WHERE table_name = 'test'
+
+```
+
+* SQLParse is a library used to parse SQL. It can parse, split and format SQL statements as shown below
+
+```
+import sqlparse
+raw = "select * from foo where foo.column1 = 'item1'"
+
+statements = sqlparse.split(raw)  #["select * from foo where foo.column1 = 'item1'"]
+query = statements[0] # select * from foo where foo.column1 = 'item1'
+formated_query = sqlparse.format(query, reindent=True, keyword_case='upper') # SELECT *\nFROM foo\nWHERE foo.column1 = 'item1'
+parsed = sqlparse.parse(formated_query)[0] # <Statement 'SELECT...' at 0x7EC103ED2DC0>
+
+print(parsed.get_type()) # SELECT
+print(parsed.tokens) # [<DML 'SELECT' at 0x7EC103EBA3E0>, <Whitespace ' ' at 0x7EC103EBA4A0>, <Wildcard '*' at 0x7EC103EBA500>, <Newline ' ' at 0x7EC103EBA560>, <Keyword 'FROM' at 0x7EC103EBA5C0>, <Whitespace ' ' at 0x7EC103EBA620>, <Identifier 'foo' at 0x7EC103ED2E40>, <Newline ' ' at 0x7EC103EBA6E0>, <Where 'WHERE ...' at 0x7EC103ED2CC0>]
+
+```
+
+
+### Doubts
+1. What is the difference between database and catalog?
+2. What are indexes and procedures?
+3. What does table schema public and pg_catalog mean? If all tables in the current database have the table_schema as public, what about other table_schema?
+4. How to get list of attributes and methods of an object? For example in the above code parsed variable is of type <class 'sqlparse.sql.Statement'>. How do we get all attributed and methods of this object?
+
+### References
+1. https://www.beekeeperstudio.io/blog/postgresql-information-schema
+2. https://medium.com/@diehardankush/catalogue-schema-and-table-understanding-database-structures-ec54347f85c7
+3. https://cloud.google.com/spanner/docs/information-schema-pg
+4. https://stackoverflow.com/questions/2276644/list-all-tables-in-postgresql-information-schema
+5. https://github.com/andialbrecht/sqlparse?tab=readme-ov-file
