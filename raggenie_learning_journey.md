@@ -442,3 +442,129 @@ print(parsed.tokens) # [<DML 'SELECT' at 0x7EC103EBA3E0>, <Whitespace ' ' at 0x7
 3. https://cloud.google.com/spanner/docs/information-schema-pg
 4. https://stackoverflow.com/questions/2276644/list-all-tables-in-postgresql-information-schema
 5. https://github.com/andialbrecht/sqlparse?tab=readme-ov-file
+
+
+## Day 5
+### Duration : 1.5 hours
+
+### Learnings
+* You don't need to install sqlite3 module. It is included in the standard library 
+
+* Sqlite3 unlike other databases like mysql and postgres does not have access control, hence no username and password while connecting. Some other things which SQLite does not have for sake of simplicity are high concurrency, stored procedures and rich set of built in functions
+
+* Transaction : series of logical operations performed to access and modify the contents of the database as per the user's request. It is a single unit of logic/work
+
+* Commit : A COMMIT statement in SQL ends a transaction within a relational database management system (RDBMS) and makes all changes visible to other users. Thus it makes all data modifications since the start of the transaction a permanent part of the database, frees the transaction's resources. Note that a transaction is not committed automatically, if we want to commit data we need to call connection.commit 
+
+* Every SQLite database contains a single "schema table" that stores the schema for that database. The schema for a database is a description of all of the other tables, indexes, triggers, and views that are contained within the database. Schema table is called sqlite_master or sqlite_schema and has the following fields
+  * type (table, index, view)
+  * name
+  * tbl_name (name of a table or view that the object is associated with)
+  * root_page
+  * sql
+
+
+```
+import sqlite3
+
+# Connect to database raggenie_test if it exists, else create a new one
+conn = sqlite3.connect("raggenie_test.db")
+
+# Open a database cursor to execute sql statments
+cur = conn.cursor()
+
+# Execute create statement against database to create movie table with 3 columns - title, year, score
+cur.execute("CREATE TABLE movie(title, year, score)")
+
+# Execute insert statement against table in databse
+# The INSERT statement implicitly opens a transaction, which needs to be committed before changes are saved in the database
+cur.execute("""
+    INSERT INTO movie VALUES
+        ('Monty Python and the Holy Grail', 1975, 8.2),
+        ('And Now for Something Completely Different', 1971, 7.5)
+""")
+
+# Commit the transaction to the database
+conn.commit()
+
+# Execute select statement to fetch all data from movie table
+res = cur.execute("select * from movie")
+
+# Return all the resulting rows
+print(res.fetchall()) # [('Monty Python and the Holy Grail', 1975, 8.2), ('And Now for Something Completely Different', 1971, 7.5)]
+
+metadata = cur.execute("SELECT * from sqlite_master")
+print(metadata.fetchall()) # [('table', 'movie', 'movie', 2, 'CREATE TABLE movie(title, year, score)')]
+
+res = cur.execute("SELECT 1;")
+print(res.fetchall()) # [(1,)]
+
+conn.close()
+```
+
+* To get the results as list of dictionary instead of list of tuples, we should change the row_factory attribute as shown below
+
+```
+
+import sqlite3
+
+# Connect to database raggenie_test if it exists, else create a new one
+conn = sqlite3.connect("raggenie_test.db")
+
+def dict_factory(cursor, row):
+    d = {}
+    for idx, col in enumerate(cursor.description):
+        d[col[0]] = row[idx]
+    return d
+
+conn.row_factory = dict_factory
+
+# Open a database cursor to execute sql statments
+cur = conn.cursor()
+
+# Execute create statement against database to create movie table with 3 columns - title, year, score
+cur.execute("CREATE TABLE movie(title, year, score)")
+
+# Execute insert statement against table in databse
+# The INSERT statement implicitly opens a transaction, which needs to be committed before changes are saved in the database
+cur.execute("""
+    INSERT INTO movie VALUES
+        ('Monty Python and the Holy Grail', 1975, 8.2),
+        ('And Now for Something Completely Different', 1971, 7.5)
+""")
+
+# Commit the transaction to the database
+conn.commit()
+
+# Execute select statement to fetch all data from movie table
+res = cur.execute("select * from movie")
+
+# Return one row rows
+print(res.fetchone()) # {'title': 'Monty Python and the Holy Grail', 'year': 1975, 'score': 8.2}
+
+metadata = cur.execute("SELECT * from sqlite_master")
+print(metadata.fetchone()) # {'type': 'table', 'name': 'movie', 'tbl_name': 'movie', 'rootpage': 2, 'sql': 'CREATE TABLE movie(title, year, score)'}
+
+name = cur.execute("SELECT name from sqlite_master") 
+print(name.fetchall()) # [{'name': 'movie'}]
+
+res = cur.execute("SELECT 1;")
+print(res.fetchall()) # [{'1': 1}]
+
+
+conn.close()
+
+```
+
+
+### Doubts
+1. What do the following properties of transactions mean - atomicity, consistency, isolation, durability?
+2. What exactly is the row_factory attribute?
+
+### References
+1. https://stackoverflow.com/questions/1807320/how-can-i-set-a-username-and-password-in-sqlite3
+2. https://stackoverflow.com/questions/1279613/what-is-an-orm-how-does-it-work-and-how-should-i-use-one
+3. https://docs.python.org/3/library/sqlite3.html#sqlite3-tutorial
+4. https://learn.microsoft.com/en-us/sql/t-sql/language-elements/commit-transaction-transact-sql?view=sql-server-ver16
+5. https://www.sqlite.org/schematab.html
+6. https://stackoverflow.com/questions/3300464/how-can-i-get-dict-from-sqlite-query
