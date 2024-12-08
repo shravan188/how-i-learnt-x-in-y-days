@@ -568,3 +568,162 @@ conn.close()
 4. https://learn.microsoft.com/en-us/sql/t-sql/language-elements/commit-transaction-transact-sql?view=sql-server-ver16
 5. https://www.sqlite.org/schematab.html
 6. https://stackoverflow.com/questions/3300464/how-can-i-get-dict-from-sqlite-query
+
+
+## Day 6
+### Duration : 1.5 hours
+
+
+### Learnings
+
+
+* An alternative approach to get dictionary output from sqlite query is to set row factory to dqlite3.Row as shown below
+
+```
+import sqlite3
+
+# Connect to database raggenie_test if it exists, else create a new one
+conn = sqlite3.connect("raggenie_test.db")
+
+conn.row_factory = sqlite3.Row
+
+# Open a database cursor to execute sql statments
+cur = conn.cursor()
+
+# Execute create statement against database to create movie table with 3 columns - title, year, score
+cur.execute("CREATE TABLE movie(title, year, score)")
+
+
+# Execute insert statement against table in databse
+# The INSERT statement implicitly opens a transaction, which needs to be committed before changes are saved in the database
+cur.execute("""
+    INSERT INTO movie VALUES
+        ('Monty Python and the Holy Grail', 1975, 8.2),
+        ('And Now for Something Completely Different', 1971, 7.5)
+""")
+
+# Commit the transaction to the database
+conn.commit()
+
+# Execute select statement to fetch all data from movie table
+res = cur.execute("select * from movie")
+
+# Result of setting row factory as sqlite3.Row is not directly dictionaries but objects like <sqlite3.Row object at 0x...>
+# To get dictionary as output, we need to cast to type dict
+print(dict(res.fetchone())) # {'title': 'Monty Python and the Holy Grail', 'year': 1975, 'score': 8.2}
+
+# Get all the metadata from sqlite schema table ie sqlite_master
+metadata = cur.execute("SELECT * from sqlite_master")
+print(dict(metadata.fetchone())) # {'type': 'table', 'name': 'movie', 'tbl_name': 'movie', 'rootpage': 2, 'sql': 'CREATE TABLE movie(title, year, score)'}
+
+# Get name of table
+name = cur.execute("SELECT name from sqlite_master") 
+print([dict(n) for n in name.fetchall()]) # [{'name': 'movie'}]
+
+res = cur.execute("SELECT 1;")
+print([dict(r) for r in res.fetchall()]) # [{'1': 1}]
+
+
+conn.close()
+
+```
+
+* When we do a rollback, it goes to start of transaction, all series of changes will be lost
+
+* We can do error handling in SQLite3 and get error codes as shown below (we try to create a table which already exists)
+```
+import sqlite3
+
+conn = sqlite3.connect('raggenie_test.db')
+cur = conn.cursor()
+try:
+  cur.execute("CREATE TABLE movie(title, year, score)")
+except SQLite3.Error as er:
+   # Python 3.11 onwards
+  print(er.sqlite_errorcode) # 1
+  print(er.sqlite_errorname) # SQLITE_ERROR (As table already exists)
+
+```
+Note that in versions prior to Python 3.11 you couldn't get error codes through Python's sqlite3 module
+
+* Types of error supported by sqlite3 in general include:
+  * sqlite3.Error (base error class)
+  * sqlite3.DatabaseError
+  * sqlite3.IntegrityError
+  * sqlite3.ProgrammingError
+
+* Using the sqlite3 command line program, we can execute SQL commands against a sqlite database as shown below
+```
+# Start the sqlite3 program
+sqlite3
+
+# Reopen persistent database raggeine_test.db
+.open raggenie_test.db
+
+# list all records in table movie
+select * from movie;
+
+# 
+select * from sqlite_master;
+
+# gives information about columns in the table
+# It gives the following details about each column : name, data type, null or not, default value, primary key
+PRAGMA table_info(movie);
+
+# query information from the table-valued function corresonding to table_info pragma for the table movie
+select * from pragma_table_info('movie');
+
+# get all column names for the table movie
+select name from pragma_table_info('movie');
+
+# Exit sqlite3 in terminal
+.quit
+
+```
+* The PRAGMA statement is an SQL extension (extension to SQL language) specific to SQLite and used to modify the operation of the SQLite library or to query the SQLite library for internal (non-table) data. The PRAGMA statement is issued using the same interface as other SQLite commands (e.g. SELECT, INSERT) but is different in the following important respects - the pragma command is specific to SQLite and is not compatible with any other SQL database engine.
+
+* PRAGMAs that return results and that have no side-effects (eg table_info, index_info) can be accessed from ordinary SELECT statements as table-valued functions. To do so, the corresponding table-valued function has the same name as the PRAGMA with "pragma_" prefix.
+
+
+* __repr__ is a special method used to define how an object should be represented in a string format
+
+```
+class Point:
+
+    def __init__(self, x, y):
+
+        self.x = x
+
+        self.y = y
+
+    def __repr__(self):
+
+        return f"Point(x={self.x}, y={self.y})"
+
+p1 = Point(3,4)
+print(repr(p1)) # Point(x=3, y=4)
+print(str(p1)) # Point(x=3, y=4)
+
+
+```
+* The standard practice is to define __repr__ in such a way that the return value of __repr__ should be an expression using which we can recreate the object (as shown in the above example). This might not always be practical though
+
+* If __str__ is not defined, the using str() will call __repr__ (as shown above)
+
+### Doubts
+1. What is a table-valued function?
+2. How does python differentiate normal functions, functions beginning with one underscore and dunder methods?
+3. What if a Python class does not have __init__ constructor method?
+
+### References
+1. https://stackoverflow.com/a/58566730
+2. https://stackoverflow.com/questions/25371636/how-to-get-sqlite-result-error-codes-in-python
+3. https://github.com/python/cpython/pull/28076
+4. https://askubuntu.com/questions/714305/how-to-exit-sqlite3-in-terminal
+5. https://stackoverflow.com/questions/9057787/opening-database-file-from-within-sqlite-command-line-shell
+6. https://www.sqlite.org/pragma.html
+7. https://www.sqlite.org/pragma.html#pragma_table_info
+8. https://stackoverflow.com/questions/947215/how-to-get-a-list-of-column-names-on-sqlite3-database
+9. https://codedamn.com/news/python/what-is-repr-in-python
+10. https://stackoverflow.com/questions/1984162/purpose-of-repr-method
+11. https://stackoverflow.com/questions/6578487/init-as-a-constructor
