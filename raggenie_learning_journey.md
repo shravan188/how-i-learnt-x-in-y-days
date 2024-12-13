@@ -900,6 +900,45 @@ Consolidated previous day learnings and wrote it down. Did not work on any code 
 
 * `__all__` affects the from <module> import * behavior only. Members that are not mentioned in `__all__` are still accessible from outside the module and can be imported with from <module> import <member>.
 
+
+```
+## main.py
+import sys
+import module1
+from module1.database import *
+
+print(sys.builtin_module_names) # a tuple containing all builtin module names like math, sys, time
+# get all the locations/directories interpreter searches for a module
+print(sys.path) 
+#['C:\\Users\\dell\\Documents\\raggenie\\raggenie_experiments', #'C:\\Users\\dell\\AppData\\Local\\Programs\\Python\\Python311\\python311.zip', #'C:\\Users\\dell\\AppData\\Local\\Programs\\Python\\Python311\\DLLs', #'C:\\Users\\dell\\AppData\\Local\\Programs\\Python\\Python311\\Lib', #'C:\\Users\\dell\\AppData\\Local\\Programs\\Python\\Python311', 'C:\\Users\\dell\\Documents\\Open #Source\\raggenie\\raggenie_experiments\\venv', 'C:\\Users\\dell\\Documents\\Open #Source\\raggenie\\raggenie_experiments\\venv\\Lib\\site-packages']
+print(dir(module1.database)) # ['MyDatabase', '__builtins__', '__cached__', '__doc__', '__file__', '__loader__', '__name__', '__package__', '__spec__', 'get_hello']
+print(dir()) 
+print(__name__)
+
+get_hello()
+db = MyDatabase('test.db')
+db.connect()
+
+
+## module1/database.py
+class MyDatabase():
+    def __init__(self, dbname):
+        self.dbname = dbname
+
+    def connect(self):
+        print("Connecting to databse")
+
+    def disconnect(self):
+        print("Disconnecting from database")
+
+
+
+def get_hello():
+    print("Hello")
+    print(__name__)
+
+```
+
 ### Doubts
 
 1. When is `__init__.py` required to import a file as a module, and when is it not required?
