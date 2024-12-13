@@ -583,7 +583,7 @@ conn.close()
 import sqlite3
 
 # Connect to database raggenie_test if it exists, else create a new one
-conn = sqlite3.connect("raggenie_test.db")
+conn = sqlite3.connect(database="raggenie_test.db")
 
 conn.row_factory = sqlite3.Row
 
@@ -727,3 +727,153 @@ print(str(p1)) # Point(x=3, y=4)
 9. https://codedamn.com/news/python/what-is-repr-in-python
 10. https://stackoverflow.com/questions/1984162/purpose-of-repr-method
 11. https://stackoverflow.com/questions/6578487/init-as-a-constructor
+
+
+## Day 7 and 8
+### Duration: 1 + 1.5 
+
+### Learnings
+
+* Origin remote points to our fork of the main project. We alo setup a remote that points to the main github repo, generally called upstream (to keep our code in sync with what is happening in master repository)
+
+```
+### setting up a repo
+### first fork the original repo
+git clone https://github.com/personalname/raggenie.git
+cd raggenie
+# list all remote set
+git remote -v
+# 
+git remote add upstream 
+
+virtualenv venv 
+venv\Scripts\activate 
+poetry install 
+
+```
+
+* While trying to install libraries ran into following error - RuntimeError : uvloop does not support Windows at the moment
+
+* Tried removing uvloop from pyproject.toml and running poetry install. Got the following error : pyproject.toml changed significantly since poetry.lock was last generated. Run `poetry lock [--no-update]` to fix the lock file. To solve this, deleted the lock file and then ran poetry install again. This time installation was successful with following warning : Warning: The current project could not be installed: No file/folder found for package raggenie
+If you do not want to install the current project use --no-root.
+If you want to use Poetry only for dependency management but not for packaging, you can disable package mode by setting package-mode = false in your pyproject.toml file.
+
+* Although installation was successful, app was not running - could not figure out the reason. Hence decided to use the docker approach, as shown below
+
+```
+## cd to the folder containing docker-compose.yaml / compose.yaml 
+
+#
+docker compose build
+#
+# d flag : detached i.e. container will run in the background and will not block the terminal
+docker compose up -d
+# see all the images
+docker images
+# see active containers
+docker ps
+
+```
+
+* The docker approach was successful, was able to setup frontend and backend successfully. 
+
+## Doubts 
+1. What does `super().__init__(__name__)` do?
+2. Does fetchmany work in sqlite3?
+3. Do select name from sqlite_master and select table_name from information_schema.tables give a similar output, and what are differences in any?
+4. Do get a dictionary output from sqlite, we have to define a dict_factory function. Should this function be defined as a classmethod/staticmethod or a normal one?
+5. What is fetch_feedback function doing?
+6. What is an ordered dict?
+7. What happens when you add code in `__init__.py` file?
+8. Should we use name or tbl_name in sqlite_master ?
+
+### References 
+1. https://www.youtube.com/watch?v=OODDLyvePr8
+2. https://docs.docker.com/compose/gettingstarted/
+
+
+
+## Day 9
+### Duration : 3 hours
+
+### Learnings
+
+* Started draft pr for creating sqlite plugin. Had to check output of each line to make sure it is consisted with the codes of the other databases
+```
+import psycopg2
+# Connect to an existing database with name test as user postgres
+conn = psycopg2.connect(dbname="test", user="postgres", password="password")
+
+# Open a cursor to perform database operations
+# Although output looks like list of lists, internally each "list" behaves like an ordered dict
+cur = conn.cursor(cursor_factory=extras.DictCursor)
+cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
+table_names = cur.fetchall() # [['test']]
+for table in table_names:
+    print(table['table_name']) # 'test'
+    print(table[0]) # 'test' 
+
+```
+
+* Tried running the code using docker approach (docker compose build -> docker compose up -d), frontend was running but backend was shutting down in a few seconds, because there was some bug in the code I had written. Removed sys.exit(1) in llm.py so that code does not exit on error, but still backend was shutting down after few seconds. Saw that llm.py called create_app function hence went to file app/main.py. Using the log files (docker container_name logs), found out that code is exiting somewhere after "initializing plugin providers". So changed logger.add to sys.stderr and then tracing the function call added a bunch of log statements in app/main.py, services/provider.py, repository/provider.py (this was where the error came up). Found out error was due to **UNIQUE constraint failed** in provider name. Went to `__init__.py` file in sqlite and changed the generic_name in Connection argument from 'Database name' to 'SQLite Database name'. This error occured because postgres already was using 'Database name', hence Sqlite could not use the same name because of the unique constraint 
+
+```
+2024-12-11 10:18:21 2024-12-11 04:48:21.387 | DEBUG    | commands.cli:cli:21 - Debug mode enabled
+2024-12-11 10:18:21 2024-12-11 04:48:21.388 | INFO     | commands.cli:cli:24 - loading configurations
+2024-12-11 10:18:21 2024-12-11 04:48:21.394 | INFO     | commands.llm:llm:21 - Intializing fastapi application server
+2024-12-11 10:18:21 2024-12-11 04:48:21.394 | INFO     | app.main:create_app:36 - creating application
+2024-12-11 10:18:21 2024-12-11 04:48:21.395 | INFO     | app.main:create_app:37 - creating container object
+2024-12-11 10:18:21 2024-12-11 04:48:21.395 | INFO     | app.main:create_app:39 - loading necessary configurations
+2024-12-11 10:18:21 2024-12-11 04:48:21.405 | INFO     | app.main:create_app:52 - Shravan 9.58 am test
+2024-12-11 10:18:21 2024-12-11 04:48:21.405 | INFO     | app.main:create_app:54 - creating database tables
+2024-12-11 10:18:21 2024-12-11 04:48:21.452 | INFO     | app.main:create_app:58 - initializing vector store
+2024-12-11 10:18:21 2024-12-11 04:48:21.453 | INFO     | app.vectordb.loader:load_class:22 - vectordb provider: chroma
+2024-12-11 10:18:21 2024-12-11 04:48:21.453 | INFO     | app.vectordb.chromadb:__init__:15 - initializing with configs
+2024-12-11 10:18:22 2024-12-11 04:48:22.887 | INFO     | app.embeddings.loader:load_embclass:31 - embedding class: chroma_default
+2024-12-11 10:18:22 2024-12-11 04:48:22.888 | INFO     | app.embeddings.chroma_default:__init__:7 - Initialising embedding providers
+2024-12-11 10:18:23 2024-12-11 04:48:23.252 | INFO     | app.vectordb.chromadb:connect:48 - Connected to ChromaDB
+2024-12-11 10:18:23 2024-12-11 04:48:23.253 | INFO     | app.main:create_app:62 - initializing plugin providers
+2024-12-11 10:18:23 2024-12-11 04:48:23.335 | INFO     | app.repository.provider:insert_or_update_data:13 - Shravan 10.12am
+2024-12-11 10:18:23 2024-12-11 04:48:23.382 | INFO     | app.repository.provider:insert_or_update_data:13 - Shravan 10.12am
+2024-12-11 10:18:23 2024-12-11 04:48:23.403 | INFO     | app.repository.provider:insert_or_update_data:13 - Shravan 10.12am
+2024-12-11 10:18:23 2024-12-11 04:48:23.414 | INFO     | app.repository.provider:insert_or_update_data:13 - Shravan 10.12am
+2024-12-11 10:18:23 2024-12-11 04:48:23.528 | INFO     | app.repository.provider:insert_or_update_data:13 - Shravan 10.12am
+2024-12-11 10:18:23 2024-12-11 04:48:23.720 | INFO     | app.repository.provider:insert_or_update_data:13 - Shravan 10.12am
+2024-12-11 10:18:23 2024-12-11 04:48:23.733 | INFO     | app.repository.provider:insert_or_update_data:31 - (sqlite3.IntegrityError) UNIQUE constraint failed: providerconfig.name
+2024-12-11 10:18:23 [SQL: INSERT INTO providerconfig (name, description, field, slug, value, enable, config_type, "order", required, provider_id, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at]
+2024-12-11 10:18:23 [parameters: ('Database name', 'Database name', 'database', 'database', 'null', 1, 1, 5, 1, 7, None, None)]
+2024-12-11 10:18:23 (Background on this error at: https://sqlalche.me/e/20/gkpj)
+2024-12-11 10:18:23 2024-12-11 04:48:23.734 | CRITICAL | commands.llm:llm:33 - Failed to start the LLM server: 'ConnectionArgument' object has no attribute 'name'
+2024-12-11 10:18:23 2024-12-11 04:48:23.734 | CRITICAL | commands.llm:llm:33 - Failed to start the LLM server: 'ConnectionArgument' object has no attribute 'name'
+
+```
+* Once error was fixed, was able to see Sqlite plugin loading in the frontend. Push the code to github and created a draft pr using the git commands below
+
+```
+git checkout -b add-sqlite-plugin
+git add app/plugins/sqlite
+git commit -m "add sqlite plugin"
+git push origin add-sqlite-plugin
+# Go to main raggenie repo and create a draft pr
+```
+
+* A lot is hidden in inheritance
+* Check case statement in app/service/connector.py (case 2 is for database)
+
+### Doubts
+1. How to see detailed error trackeback? Which is better logging or using debugger? How do we use a debugger within docker? 
+2. What is sys.stderr?
+
+### References
+1. https://stackoverflow.com/questions/32416585/whats-the-difference-between-name-and-tbl-name-in-sqlite-master
+2. https://www.vectorlogo.zone/logos/sqlite/
+3. https://stackoverflow.com/questions/47829345/how-to-see-the-logs-of-a-docker-container
+4. https://stackoverflow.com/questions/31420317/how-to-understand-sys-stdout-and-sys-stderr-in-python
+
+
+## Day 10
+### Duration : 2 hours
+
+Consolidated previous day learnings and wrote it down. Did not work on any code today. Also had discussion on how to add sqlite plugin as unlike other databases, it is a file based database.
+
+
