@@ -877,3 +877,42 @@ git push origin add-sqlite-plugin
 Consolidated previous day learnings and wrote it down. Did not work on any code today. Also had discussion on how to add sqlite plugin as unlike other databases, it is a file based database.
 
 
+## Day 11
+### Duration : 2 hours
+
+### Learnings
+
+* `__name__` is a variable that exists in every Python module, and is set to the name of the module
+
+* `__main__` is the name of the environment where top-level code is run. “Top-level code” is the first user-specified Python module that starts running. It’s “top-level” because it imports all other modules that the program needs. Sometimes “top-level code” is called an entry point to the application 
+
+* Due to previous point, we use the code `if __name__ == '__main__'` in a python file (say foo.py). This implies if we run foo directly from the terminal using `python foo.py` then the code within the if block is executed as when we run the file, `__name__` of the module foo is set to `__main__`. However if we import the foo module in another python file, then the code within the if block does not run (as `__name__` is set to foo)
+
+* Prior to Python 3.3, to make a directory into a package `__init__.py` was required. Since Python 3.3, it is still required if we want to create a regular package. A regular pakage is generally implemented as a directory containing an `__init__.py` file. **When a regular package is imported, this `__init__.py` file is implicitly executed, and the objects it defines are bound to names in the package’s namespace**
+
+* Order in which Python interpreter searches for a module when it is imported is as follows (entire list of directories interpreter searches to get the file can be obtained by printing sys.path)
+  * Built in modules
+  * Directory of input script/current directory
+  * PYTHONPATH
+  * site-packages directory
+
+* Built-in function dir() is used to find out which names a module defines
+
+* `__all__` affects the from <module> import * behavior only. Members that are not mentioned in `__all__` are still accessible from outside the module and can be imported with from <module> import <member>.
+
+### Doubts
+
+1. When is `__init__.py` required to import a file as a module, and when is it not required?
+2. What is difference bw file, script and module in python?
+3. What is the difference bw namespace package and regular package, and when to use namespace package?
+4. What are compiled python files?
+5. What is difference bw a module and a package?
+6. How is the main.py file able to access the class although `__all__` in `__init__.py` only has the get_hello function?
+
+### References
+1. https://stackoverflow.com/questions/44834/what-does-all-mean-in-python
+2. https://stackoverflow.com/questions/22942650/relative-import-from-init-py-file-throws-error
+3. https://stackoverflow.com/questions/11536764/how-to-fix-attempted-relative-import-in-non-package-even-with-init-py
+4. https://stackoverflow.com/questions/2996110/what-is-the-difference-between-a-module-and-a-script-in-python
+5. https://stackoverflow.com/questions/448271/what-is-init-py-for
+6. https://docs.python.org/3/tutorial/modules.html
