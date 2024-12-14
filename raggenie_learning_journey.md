@@ -947,6 +947,7 @@ def get_hello():
 4. What are compiled python files?
 5. What is difference bw a module and a package?
 6. How is the main.py file able to access the class although `__all__` in `__init__.py` only has the get_hello function?
+7. What exactly is PYTHONPATH?
 
 ### References
 1. https://stackoverflow.com/questions/44834/what-does-all-mean-in-python
@@ -955,3 +956,117 @@ def get_hello():
 4. https://stackoverflow.com/questions/2996110/what-is-the-difference-between-a-module-and-a-script-in-python
 5. https://stackoverflow.com/questions/448271/what-is-init-py-for
 6. https://docs.python.org/3/tutorial/modules.html
+
+## Day 12
+### Duration : 2.5 hours
+
+### Learnings
+* Initially, even after placing a sample database named raggenie_test.db in the root folder and trying to connect to it, was getting an error in the application showing healthcheck failed. To debug this first went into the docker container using `docker compose exec` and tried to connect to it directly from the command line as shown below 
+
+```
+docker compose build
+docker compose up -d
+
+# to run commands within the services/container
+# no need of -t flag here as by default docker compose exec allocates a TTY.
+docker compose exec backend bash
+
+python
+
+>>> import sqlite3
+>>> conn = sqlite3.connect('raggenie_test.db)
+>>> bool(conn) 
+True
+>>> exit()
+
+```
+ * From above realized that issue was not with the raggenie.db file. So added some logging statments in the handler file itself, like those shown below. Realized that in healthcheck function I had accidently put `if self.connection or True` instead of `if self.connection or False`, hence if statement was always becoming true and hence throwing an error
+
+ ```
+import os
+cwd = os.getcwd()
+logger.info(cwd)
+
+```
+
+* Once above error was fixed, ran into the following error shown below.
+
+```
+:09:57 2024-12-14 04:39:57.986 | INFO     | app.plugins.sqlite.handler:healthcheck:55 - /app
+2024-12-14 10:09:58 ERROR:    Exception in ASGI application
+2024-12-14 10:09:58 Traceback (most recent call last):
+2024-12-14 10:09:58     raise exc
+2024-12-14 10:09:58   File "/opt/venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 2177, in run_sync_in_worker_thread
+2024-12-14 10:09:58     return await future
+2024-12-14 10:09:58            ^^^^^^^^^^^^
+2024-12-14 10:09:58   File "/opt/venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 859, in run
+2024-12-14 10:09:58     result = context.run(func, *args)
+2024-12-14 10:09:58              ^^^^^^^^^^^^^^^^^^^^^^^^
+2024-12-14 10:09:58   File "/app/app/api/v1/provider.py", line 93, in test_connections
+2024-12-14 10:09:58     success, message = svc.test_credentials(provider_id, config, db)
+2024-12-14 10:09:58                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2024-12-14 10:09:58   File "/app/app/services/provider.py", line 221, in test_credentials
+2024-12-14 10:09:58     return test_plugin_connection(provider_configs, config, provider.key)
+2024-12-14 10:09:58            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2024-12-14 10:09:58   File "/app/app/services/connector_details.py", line 28, in test_plugin_connection
+2024-12-14 10:09:58     success, err = datasource.healthcheck()
+2024-12-14 10:09:58                    ^^^^^^^^^^^^^^^^^^^^^^^^
+2024-12-14 10:09:58   File "/app/app/plugins/sqlite/handler.py", line 61, in healthcheck
+2024-12-14 10:09:58     with self.connection.cursor() as cursor:
+2024-12-14 10:09:58 TypeError: 'sqlite3.Cursor' object does not support the context manager protocol
+
+```
+
+* We cannot use `with conn.cursor() as cursor` in sqlite (refer 2) (also why are we using with if we do not want to close the cursor in the first place?). Changed code as shown below
+
+```
+## old code
+with self.connection.cursor() as cursor:
+  cursor.execute("SELECT 1;")
+  return True, None
+
+## new code
+self.cursor.execute("SELECT 1;")
+return True, None  
+
+```
+
+* If a database does not exist, sqlite creates it instead of throwing an error, hence healthcheck i.e. checking if connection exisits will always be true even if you pass a random database name. To solve this issue, we have to use URI instead of file path, because when we pass a uri to connect, we can specify the mode. The modes available are
+  * ro (database is opened for read-only access)
+  * rw (the database is opened for read-write (but not create) access)
+  * rwc
+  * memory
+ We can use the rw mode to ensure that sqlite connects only to an existing database and does not create a new one
+
+ ```
+import sqlite3
+import pathlib
+import urllib
+
+def _path_to_uri(path):
+    path = pathlib.Path(path)
+    if path.is_absolute():
+        return path.as_uri()
+    return 'file:' + urllib.parse.quote(path.as_posix(), safe=':/')
+
+database_path = 'raggenie_test.db'
+print(f"{_path_to_uri(database_name)}?mode=rw")
+
+# Connect to database raggenie_test only if it exists else throw an error since we are using mode rw
+# which allows only read and writing to an existing db, but not creating a new one
+conn = sqlite3.connect(database=f"{_path_to_uri(database_path)}?mode=rw", uri=True)
+conn.close()
+
+ ```
+
+### Doubts
+1. Where does the app search for the sqlite file?
+2. What is `__enter__` and `__exit__` when using a context manager? When do we use the contextlib library?
+3. How to check self.connection.closed in sqlite?
+
+
+### References
+1. https://docs.docker.com/reference/cli/docker/compose/exec/
+2. https://stackoverflow.com/questions/53471672/is-there-a-with-conn-cursor-as-way-to-work-with-sqlite
+3. https://stackoverflow.com/questions/12932607/how-to-check-if-a-sqlite3-database-exists-in-python
+4. https://stackoverflow.com/a/47351632
