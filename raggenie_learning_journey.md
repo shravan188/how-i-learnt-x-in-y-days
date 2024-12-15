@@ -1063,10 +1063,261 @@ conn.close()
 1. Where does the app search for the sqlite file?
 2. What is `__enter__` and `__exit__` when using a context manager? When do we use the contextlib library?
 3. How to check self.connection.closed in sqlite?
-
+4. What do path.as_posix(), path.is_absolute(), path.as_uri() and urllib.parse.quote() functions do?
 
 ### References
 1. https://docs.docker.com/reference/cli/docker/compose/exec/
 2. https://stackoverflow.com/questions/53471672/is-there-a-with-conn-cursor-as-way-to-work-with-sqlite
 3. https://stackoverflow.com/questions/12932607/how-to-check-if-a-sqlite3-database-exists-in-python
 4. https://stackoverflow.com/a/47351632
+
+
+## Day 13
+### Duration : 1 hour
+
+### Learnings
+
+* We cannot directly initialize params of cursor.execute to an empty dict because of 1. Instead we put default value as None and then modify it within function as shown below
+```
+# Wrong approach
+def fetch_data(self, query, params={}):
+  try:
+    self.cursor.execute(query, params)
+
+# Right approach
+def fetch_data(self, query, params=None):
+  try:
+    params = {} if params is None else params
+    self.cursor.execute(query, params)
+
+```
+* Errors faced
+
+```
+sqlite3.ProgrammingError: Cannot operate on a closed database.
+
+Traceback (most recent call last):
+  File "C:\Users\dell\Documents\Open Source\raggenie\raggenie_experiments\test_sqlite_handler.py", line 191, in <module>
+    schema_ddl, table_metadata = sqlite.fetch_schema_details
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: cannot unpack non-iterable method object
+```
+* Isolated the sqlite handler class and tested each of the methods to see it is working as expected
+
+```
+import sqlite3
+import uuid
+
+class Sqlite():
+    def __init__(self, database:str):
+        print("Initializing datasource")
+        #super().__init__(__name__)
+
+        self.params = {
+            'database': database
+        }
+        self.connection = None
+
+        # class specific
+        self.cursor = None
+        self.max_limit = 5
+
+    def dict_factory(self, cursor, row):
+        d = {}
+        for idx, col in enumerate(cursor.description):
+            d[col[0]] = row[idx]
+        return d
+    
+    def connect(self):
+        try:            
+            self.connection = sqlite3.connect(**self.params)
+            self.connection.row_factory = self.dict_factory
+            self.cursor = self.connection.cursor()
+            
+            print("Connection to SQLite DB successful.")
+            return True, None
+        except sqlite3.Error as error:
+            print(f"Error connecting to SQLite DB: {error}")
+            return False, error
+
+    # TO DO: Check how to check self.connection.closed in sqlite
+    def healthcheck(self):
+        try:
+            if self.connection is None:
+                print("Connection to SQLite DB is not established.")
+                return False, "Connection to SQLite DB is not established."
+
+            self.cursor.execute("SELECT 1;")
+            return True, None        
+        except sqlite3.Error as error:
+            return False, error
+
+    def configure_datasource(self, init_config):
+        print("Configuring datasource")
+        if init_config is not None and "script" in init_config:
+            try:
+                self.cursor.execute(init_config["script"])
+                self.connection.commit()
+            except Exception as e:
+                return e
+
+        return None
+
+    def fetch_data(self, query, params=None):
+        try:
+            params = {} if params is None else params
+            self.cursor.execute(query, params)
+            if "limit"  not in query.lower():
+                return self.cursor.fetchmany(self.max_limit), None
+            else:
+                return self.cursor.fetchall(), None
+        except Exception as e:
+            print(e)
+            self.connection.rollback()
+            return None, e
+
+    def fetch_schema_details(self):
+        #Creating ddl from table schema
+        table_metadata = []
+        schema_ddl = []
+
+        table_schemas=self._fetch_table_schema()
+
+        if len(table_schemas) != 0 :
+
+            for table, columns in table_schemas.items():
+                table_ddl = ""
+
+                schema = {
+                    "table_id": str(uuid.uuid4()),
+                    "table_name": table,
+                    "description": "",
+                    "columns": []
+                }
+
+                fields= []
+
+
+                table_ddl = f"\n\nCREATE TABLE {table}"
+                # print(f"columns:{columns}")
+                for column in columns:
+                    fields.append({
+                        "column_id" : str(uuid.uuid4()),
+                        "column_name": column['name'],
+                        "column_type": column['type'],
+                        "description": "",
+                    })
+                    table_ddl +=f"\n{column['name']} {column['type']} ,"
+                table_ddl +=f");"
+
+                schema["columns"] = fields
+                table_metadata.append(schema)
+                schema_ddl.append(table_ddl)
+
+        return schema_ddl, table_metadata
+
+    def create_ddl_from_metadata(self,table_metadata):
+        schema_ddl = []
+        for table in table_metadata:
+            tmp = f"\n\nCREATE TABLE {table['table_name']}"
+            for field in table["columns"]:
+                tmp = f"{tmp} {field.get('column_name','')} \n"
+            schema_ddl.append(tmp)
+        return schema_ddl
+
+    def _fetch_table_schema(self):
+        # Execute query to get all table names 
+        self.cursor.execute("SELECT name FROM sqlite_master")
+        # Fetch all table names
+        table_names = self.cursor.fetchall()
+        print(table_names)
+        table_schemas = {}
+
+        for table in table_names:
+
+            # print(f"table_name:{table['name']}")
+            self.cursor.execute(f"SELECT name, type FROM pragma_table_info('{table['name']}')")
+            columns = self.cursor.fetchall()
+
+
+            table_schemas[table['name']] = columns
+        return table_schemas
+
+    def fetch_feedback(self):
+        pass
+
+    def validate(self,formated_sql):
+        #validate sql using SQLParser
+        queries = sqlparse.split(formated_sql)
+        query = queries[0]
+        formated_query = sqlparse.format(query, reindent=True, keyword_case='upper')
+
+        parsed = sqlparse.parse(formated_query)[0]
+
+        if parsed.get_type() != 'SELECT':
+            return "Sorry, I am not designed for data manipulation operations"
+
+        token_names = [p._get_repr_name() for p in parsed.tokens]
+        if "DDL" in token_names:
+            return "Sorry, I am not designed for data manipulation operations"
+
+        #sql_query = sqlvalidator.parse(formated_sql)
+        if not sql_query.is_valid():
+            print(sql_query.is_valid())
+            return "I didn't get you, Please reframe your question"
+
+        return  None
+
+    def close_conection(self):
+        self.cursor.close()
+        self.connection.close()
+
+sqlite = Sqlite('raggenie_test.db')
+sqlite.connect()
+sqlite.healthcheck()
+query = """
+select * from movie;
+"""
+data = sqlite.fetch_data(query=query)
+print(data)
+query2 = """
+select * from movie limit 2;
+"""
+data = sqlite.fetch_data(query=query2)
+print(data) 
+# ([
+#     {'title': 'Monty Python and the Holy Grail', 'year': 1975, 'score': 8.2}, 
+#     {'title': 'And Now for Something Completely Different', 'year': 1971, 'score': 7.5}
+#  ], None)
+
+table_schemas =  sqlite._fetch_table_schema()
+print(table_schemas)
+# {'movie': [{'name': 'title', 'type': ''}, {'name': 'year', 'type': ''}, {'name': 'score', 'type': ''}]}
+
+schema_ddl, table_metadata = sqlite.fetch_schema_details()
+print(schema_ddl)
+#['\n\nCREATE TABLE movie\ntitle  ,\nyear  ,\nscore  ,);']
+print(table_metadata)
+# [{'table_id': 'bdf5c6f4-cefa-4c4e-8efa-1aa85c53d3d9', 
+#   'table_name': 'movie', 
+#   'description': '', 
+#   'columns': [
+#       {'column_id': 'afe01765-34dc-4a28-aca3-680191947fca', 'column_name': 'title', 'column_type': '', 'description': ''}, 
+#       {'column_id': '223703fa-a3b6-4cdd-8f89-a6498be8633c', 'column_name': 'year', 'column_type': '', 'description': ''}, 
+#       {'column_id': '8f3eb09e-d44c-4f6f-b1e6-e4684d434f3f', 'column_name': 'score', 'column_type': '', 'description': ''}
+#       ]
+#  }]
+
+sqlite.close_conection()
+
+
+```
+
+### Doubts
+1. What are placeholders in sql query (params in cursor.execute())
+2. What does `super().__init__(__name__)` do?
+
+
+### References
+1. https://stackoverflow.com/questions/26320899/why-is-the-empty-dictionary-a-dangerous-default-value-in-python
+2. https://stackoverflow.com/questions/11529273/how-to-condense-if-else-into-one-line-in-python
