@@ -94,8 +94,8 @@ select * from actor_films;
 ### References
 1. https://www.youtube.com/watch?v=UjQiwonRMas
 
-## Day 4
-### Duration : 3 hours
+## Day 4 and 5
+### Duration : 3.5 + 1 hours
 
 ### Learnings
 * Postgres has multiple built in types. Some of the main ones are
@@ -110,7 +110,32 @@ select * from actor_films;
 
 * Enum type is a custom data type that allows you to define a list of possible values for a column.If you attempt to insert or update a row with a value not in the list, PostgreSQL will issue an error. When we do ORDER BY with an enum field, it orders the rows based on the order in which we list them when we define the enum.
 
-*
+* We can define an array and insert into it as follows. Also by using the UNNEST function, we can expands the array into multiple individual rows
+
+```
+--- Run code in https://onecompiler.com/postgresql
+-- create
+CREATE TABLE EMPLOYEE (
+  empId INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  dept TEXT NOT NULL,
+  phone_numbers TEXT []
+);
+
+-- insert
+INSERT INTO EMPLOYEE VALUES (0001, 'Clark', 'Sales', ARRAY ['123-456-789', '123-456-789']);
+INSERT INTO EMPLOYEE VALUES (0002, 'Dave', 'Accounting',  ARRAY ['123-456-789', '123-456-789']);
+INSERT INTO EMPLOYEE VALUES (0003, 'Ava', 'Sales',  ARRAY ['123-456-789', '123-456-789']);
+
+-- fetch 
+SELECT * FROM EMPLOYEE WHERE dept = 'Sales';
+
+-- fetch with unnest
+SELECT empId, name, dept, unnest(phone_numbers) FROM EMPLOYEE WHERE dept = 'Sales';
+
+
+
+```
 
 * The goal of this exercise is to create a new cumulative table called players which has only 1 row per player - and all the fields that change or keep getting added with time such as season, pts, assists, rebounds, etc are stored as an array in a single column. This new table design helps compress information and makes joins easier
 
@@ -146,7 +171,7 @@ CREATE TABLE players (
 )
 
 -- today cte is the seed query, as it populates the database with initial data
--- we have to run this repeatedly with successive years to get the entire data
+-- we have to run this repeatedly with successive years to get the entire data (next current_season = 1996 and season = 1997 and so on)
 WITH yesterday AS (
    select * from players
    where current_season = 1995
@@ -166,7 +191,7 @@ SELECT
    COALESCE(y.draft_number, t.draft_number) as draft_number,
    COALESCE(y.seasons, ARRAY[]::season_stats[]) ||
             ARRAY[ROW(
-               t.seasons,
+               t.season,
                t.pts,
                t.ast,
                t.reb, 
@@ -186,19 +211,85 @@ SELECT
    ELSE y.years_since_last_active + 1
    END as years_since_last_active,
    t.season IS NOT NULL as is_active,
-   COALESCE(t.season, y.current_season + 1) as current_season,
+   COALESCE(t.season, y.current_season + 1) as current_season
 
 FROM yesterday y FULL OUTER JOIN today t
-ON y.player_name = t.player_name
+ON y.player_name = t.player_name;
+
+-- to see history of Michael Jordan as of 1997
+select player_name, height, college, country, (unnest(seasons)::season_stats).* from players
+where player_name like '%Michael Jordan%' and current_season = 1997;
 
 ```
+
+
+* Note that single quotes and double quotes have different meaning in SQL, unlike Python. When doing string comparison, we have to use single quotes not double quotes eg. `where player_name like '%Michael%'`
+
 ### Doubts
 1. What are functions in Postgres and how do we define and use them?
 2. Why is the order in coalesce previous followed by current?
+3. What is difference b/w execute script and execute query in pgadmin?
+4. What is the difference b/w procedural code and SQL in Postgres? Why is this difference not there in SQL server?
+5. https://stackoverflow.com/questions/54351802/how-i-can-run-parts-of-sql-query-separate-in-pgadmin4
 
 
 ### References
 1. https://neon.tech/postgresql/postgresql-tutorial/postgresql-data-types
+2. https://onecompiler.com/postgresql (playground to run postgresql)
+3. https://popsql.com/learn-sql/postgresql/how-to-insert-data-into-an-array-in-postgresql
+4. https://www.w3resource.com/PostgreSQL/postgresql_unnest-function.php
+
+## Day 6
+### Duration : 1 hour
+
+### Learnings
+
+* Slowly Changing Dimensions : 
+
+* 2 approaches to create SCD table : 
+
+```
+WITH streak_started AS (
+   SELECT player_name,
+         current_season,
+         scoring_class,
+         LAG(scoring_class, 1) OVER 
+            (PARTITION BY player_name ORDER BY current_season) <> scoring_class
+            OR LAG(scoaring_class, 1) OVER
+            (PARTITION BY player_name ORDER BY current_season) IS NULL
+            AS did_change,
+       -- LAG(is_active, 1) OVER(PARTITION BY player_name ORDER BY current_season) <> is_active AS is_active_change_indicator,
+      FROM players
+),
+   streak_identified AS (
+      SELECT player_name,
+            scoring_class,
+            current_season,
+            SUM(CASE WHEN did_change THEN 1 ELSE 0 END)
+               OVER (PARTITION BY player_name) as streak_identifier,
+            is_active,
+
+         FROM streak_started
+   )
+
+SELECT
+   player_name,
+   scoring_class,
+   streak_identifier,
+   MIN(current_season) AS start_date,
+   MAX(current_season) AS end_date,
+FROM streak_identified
+GROUP BY 1,2,3
+
+
+```
+* We are essentially using group by to track fields which change. In this case, we are tracking change in scoring_class for each player, so when we group by player_name and scoring_class, we can get from which season (i.e. start_date) to which season (i.e. end_date) a player was in a particular scoring_class. We can track more than one fields using the same logic, for example we want to track scoring_class and is_active, we can add is_active to GROUP BY clause, and we will get min and max seasons based on the combination of those 2 fields (streak_identifier is dependent on scoring_class hence adding it to group by makes no additional impact)
+
+### Doubts
+
+### References
+1. https://www.youtube.com/watch?v=nyu-8Si21ec
+
 
 
 ## Day N
@@ -262,6 +353,8 @@ print(df.count()) # 404814
 9. https://www.reddit.com/r/dataengineering/comments/1g03cyw/how_does_spark_compare_to_postgres_in_large_scale/
 10. https://stackoverflow.com/questions/76242658/if-spark-isnt-a-storage-system-how-do-tables-work
 11. https://www.java-success.com/5-apache-spark-coalesce-vs-repartition-scenarios-interview-qas/
+
+
 
 
 ## Day N + 1
