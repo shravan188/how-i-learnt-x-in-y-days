@@ -231,7 +231,8 @@ where player_name like '%Michael Jordan%' and current_season = 1997;
 3. What is difference b/w execute script and execute query in pgadmin?
 4. What is the difference b/w procedural code and SQL in Postgres? Why is this difference not there in SQL server?
 5. https://stackoverflow.com/questions/54351802/how-i-can-run-parts-of-sql-query-separate-in-pgadmin4
-
+6. Suppose we have to fill the cumulative table till 2021, should we have to manually do it from 1996 to 2021, or is there a shorter way?
+7. The code above keeps adding rows with null values for season_stats column, even after player has retired. Can we improve that?
 
 ### References
 1. https://neon.tech/postgresql/postgresql-tutorial/postgresql-data-types
@@ -244,9 +245,15 @@ where player_name like '%Michael Jordan%' and current_season = 1997;
 
 ### Learnings
 
-* Slowly Changing Dimensions : 
+* Facts and Dimensions : Facts represent measurable events (e.g., sales), while dimensions provide descriptive context (e.g., customer, product) for those facts
+
+* Slowly Changing Dimensions : A Slowly Changing Dimension (SCD) is a dimension (basically a column) while generally stable, may change over time, often in an unpredictable manner. Common examples include geographical location(such as address), customer/employee details (level 4 manager name), product attributes
+
+* Rapidly changing dimensions :  Rapidly changing dimension are dimensions which undergo frequent updates, for example transactional parameters like customer ID, product ID and price
 
 * 2 approaches to create SCD table : 
+      * By creating the entire SCD table from scratch every refresh (use entire history/full refresh)
+      * By incrementally adding data to already existing SCD table (incremental refresh)
 
 ```
 WITH streak_started AS (
@@ -275,22 +282,180 @@ WITH streak_started AS (
 SELECT
    player_name,
    scoring_class,
+   is_active,
    streak_identifier,
    MIN(current_season) AS start_date,
    MAX(current_season) AS end_date,
+   2009 AS current_season -- last season in the players data is 2009
 FROM streak_identified
 GROUP BY 1,2,3
 
 
 ```
-* We are essentially using group by to track fields which change. In this case, we are tracking change in scoring_class for each player, so when we group by player_name and scoring_class, we can get from which season (i.e. start_date) to which season (i.e. end_date) a player was in a particular scoring_class. We can track more than one fields using the same logic, for example we want to track scoring_class and is_active, we can add is_active to GROUP BY clause, and we will get min and max seasons based on the combination of those 2 fields (streak_identifier is dependent on scoring_class hence adding it to group by makes no additional impact)
+* We are essentially using GROUP BY to track fields which change. In this case, we are tracking change in scoring_class for each player, so when we group by player_name and scoring_class, we can get from which season (i.e. start_date) to which season (i.e. end_date) a player was in a particular scoring_class. We can track more than one fields using the same logic, for example we want to track scoring_class and is_active, we can add is_active to GROUP BY clause, and we will get min and max seasons based on the combination of those 2 fields (streak_identifier is dependent on scoring_class hence adding it to group by makes no additional impact)
+
+* If before converting to SCD2 a value is same across 10 rows (in this case 10 seasons), after creating SCD2 it will be just one row with the value, the start_date and the end_date. To achieve this we use GROUP BY
+
+* When using GROUP BY, column must appear in the GROUP BY clause or be used in an aggregate function
+
 
 ### Doubts
+1. Why are we computing the streak_identifier in the first place? WHat value does it add?
+2. If we try to create an SCD table using all of history, we may get wrong values if the person goes from value 1 to value 2 and then back to value 1 over a period of time. For example, Aaron McKie is bad from 1996 to 1999, avarage from 2000 to 2001 and again bad from 2002 to 2005. So for him there will be only 1 row with scoring_class as "bad" with start_date as 1996 and end_date as 2005, instead of 2 rows of "bad" 1996 to 1999 and 2002 to 2005. How do we avoid this?
 
 ### References
 1. https://www.youtube.com/watch?v=nyu-8Si21ec
+2. https://www.sqlshack.com/implementing-slowly-changing-dimensions-scds-in-data-warehouses/
+3. https://stackoverflow.com/questions/77483950/implement-scd-type-2-on-periodic-snapshot-table
+
+## Day 7 and 8
+### Duration : 1.5 + 2
+
+### Learnings
+* As mentioned in Doubts of Day 6, using GROUP BY may give incorrect information, hence used a different approach involving just the WHERE clause and LEAD window function as show below
+
+```
+--- better code to create scd table
+WITH streak_started AS (
+	SELECT player_name,
+         current_season,
+         scoring_class,
+		 is_active,
+         LAG(scoring_class, 1) OVER (PARTITION BY player_name ORDER BY current_season) <> scoring_class
+            OR LAG(scoring_class, 1) OVER (PARTITION BY player_name ORDER BY current_season) IS NULL
+			OR LAG(is_active, 1) OVER(PARTITION BY player_name ORDER BY current_season) <> is_active
+         AS did_change
+      FROM players
+)
+
+SELECT
+   player_name,
+   scoring_class,
+   is_active,
+   current_season AS start_date,
+   lead(current_season, 1, 9999) OVER (PARTITION BY player_name ORDER BY current_season) AS end_date
+FROM streak_started
+WHERE did_change 
+ORDER BY player_name, start_date;
+
+-- SELECT * FROM players
+-- WHERE player_name = 'Aaron McKie'
+```
+
+* Instead of creating SCD table fully (i.e. full refresh) using above approach, we can only add data to it incrementally (i.e. incremental refresh). When we add data to a SCD table incrementally, we have to handle 3 types of scenarios:
+      * Existing rows unchanged i.e. all dimension values remains same for an existing player
+      * Existing rows change i.e. any one or more of the dimensions for an exisiting player change
+      * New rows created i.e. a new player is added
+Each of these 3 scenarios must be handled separately, as shown in the diagram and code below
 
 
+```
+CREATE TYPE scd_type AS (
+                    scoring_class scoring_class,
+                    start_season INTEGER,
+                    end_season INTEGER
+   )
+
+
+WITH historical_scd as (
+   SELECT 
+      player_name,
+      scoring_class,
+      is_active,
+      start_season,
+      end_season
+   FROM player_scd
+   WHERE current_season = 2021
+   AND end_season < 2021
+),
+last_season_scd as (
+   -- we will not be using this cte in the final union all, hence we just select all columns
+   SELECT *         
+   FROM player_scd
+   WHERE current_season = 2021
+   AND end_season = 2021
+),
+this_season_data as (
+   -- we will not be using this cte in the final union all, hence we just select all columns
+   SELECT * FROM players
+   WHERE current_season = 2022
+)
+unchanged_records as (
+   SELECT 
+      ls.player_name,
+      ls.scoring_class,
+      ls.is_active,
+      ls.start_season,
+      ts.current_season as end_season
+   FROM this_season_data ts
+   INNER JOIN last_season_scd ls
+   ON ts.player_name = ls.player_name
+   WHERE ts.scoring_class = ls.scoring_class AND ts.is_active = ls.is_active
+),
+changed_records as (
+   SELECT 
+      ts.player_name
+      UNNEST(ARRAY[
+         ROW(
+            ls.scoring_class,
+            ls.is_active,
+            ls.start_season,
+            ls.end_season   
+         ),
+         ROW(
+            ts.scoring_class,
+            ts.is_active,
+            ts.start_season,
+            ts.end_season
+         )
+
+      ])
+   FROM last_season_scd ls
+   LEFT JOIN this_season_data ts
+   ON ls.player_name = ts.player_name
+   WHERE ts.scoring_class <> ls.scoring_class OR ts.is_active <> ls.is_active
+),
+new_records as (
+   SELECT 
+      ts.player_name,
+      ts.scoring_class,
+      ts.is_active,
+      ts.current_season as start_season,
+      ts.current_season as end_season
+   FROM this_season_data ts
+   LEFT JOIN last_season_scd ls
+   WHERE ls.player_name IS NULL
+
+)
+
+SELECT *, 2022 AS current_season FROM (
+   SELECT * FROM historical_scd
+   UNION ALL
+   SELECT * FROM unchanged_records
+   UNION ALL
+   SELECT * FROM changed_records
+   UNION ALL
+   SELECT * FROM new_records
+)
+
+
+```
+
+* A subtle point to remember - if the current season is 2022 and previous season is 2021, we are taking historical scd with end_season < 2021 and not end_season <= 2021, because if dimension values are unchanged we do not want the row with end_season as 2021, we will be creating a new row with end_season as 2022 for the player. As a side effect of this, we cannot club changed_records with new_records because, for changed_records, we will have to create two rows - the one with end_season 2021 and the second row with start_season and end_season as 2022. On the other hand for new_records, we create only a single row, with start_season and end_season as 2022
+
+* Although current_season is not required from an SCD standpoint, it is helpful in handling the different scenarios when incrementally adding data to the SCD table
+
+
+### Doubts
+1. In changed_records cte, why last_season LEFT JOIN this_season and not vice versa?
+2. How to select rows present in table 1 but not in table 2 while joining 2 tables? (check new_records cte)
+3. How to determine the WHERE clauses for historical_scd and last_season_scd?
+4. Why do we need current_season in SCD table? Cant we just have start_season and end_season?
+5. Why do we have separate CTE for changed_records and new_records? Can't we club both of these scenarios into a single one as in both cases we just have to add a new row with the new values and start_season and end_season as current_season?
+
+### References
+1. https://community.spiceworks.com/t/difference-between-scd-load-and-incremental-load-in-informatica/864169/2
+2. https://medium.com/analytics-vidhya/slowly-changing-dimensions-at-scale-bf9ce9157951
 
 ## Day N
 ### Duration : 1.5 hours
@@ -630,3 +795,5 @@ AdaptiveSparkPlan isFinalPlan=false
 6. https://stackoverflow.com/questions/67135876/how-many-cpu-cores-does-google-colab-assigns-when-i-keep-n-jobs-8-is-there-an
 7. https://www.reddit.com/r/apachespark/comments/1d57daf/how_to_decide_optimal_number_of_partitions/
 8. https://aspinfo.medium.com/how-to-improve-performance-with-bucketing-in-pyspark-c66a899e70b5
+
+
