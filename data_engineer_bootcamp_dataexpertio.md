@@ -147,10 +147,10 @@ CREATE TYPE season_stats AS (
       ast REAL,
       reb REAL,
       weight INTEGER
-)
+);
 
 -- 
-CREATE TYPE scoring_class as ENUM('bad', 'average', 'good', 'star')
+CREATE TYPE scoring_class as ENUM('bad', 'average', 'good', 'star');
 
 -- seasons field stores an array of season_stats, so similar to an array of tuples in python
 -- scoring_class, years_since_last_active, is_active and current_season are derived columns
@@ -168,7 +168,7 @@ CREATE TABLE players (
      is_active BOOLEAN,
      current_season INTEGER,
      PRIMARY KEY (player_name, current_season)
-)
+);
 
 -- today cte is the seed query, as it populates the database with initial data
 -- we have to run this repeatedly with successive years to get the entire data (next current_season = 1996 and season = 1997 and so on)
@@ -456,6 +456,231 @@ SELECT *, 2022 AS current_season FROM (
 ### References
 1. https://community.spiceworks.com/t/difference-between-scd-load-and-incremental-load-in-informatica/864169/2
 2. https://medium.com/analytics-vidhya/slowly-changing-dimensions-at-scale-bf9ce9157951
+
+## Day 9, 10, 11, 12
+
+### Duration : 4 + 2 + 1 + 1 hours
+
+### Learnings
+* Worked on W1 Homework on dimensional modeling
+
+
+* Encountered `ERROR:  operator does not exist: integer = text LINE 40: ON py.actorid = ty.actorid`, because actorid was text in one table, integer in another. To solve this dropped table actors using below code, and recreated with actorid as text instead of integer
+
+```
+DROP TABLE actors
+```
+
+* Encountered `ERROR:  Cannot cast type integer[] to integer in column 2. cannot cast type record to film_stats ` 
+
+* ERROR:  column films of table actors depends on type film_stats[] cannot drop type film_stats because other objects depend on it 
+
+* ERROR:  cannot drop type film_stats because other objects depend on it
+SQL state: 2BP01
+Detail: column films of table actors depends on type film_stats[]
+
+* On trying ALTER TYPE film_stats ALTER ATTRIBUTE votes SET DATA TYPE INTEGER[];
+ERROR:  cannot alter type "film_stats" because column "actors.films" uses it 
+
+* ERROR:  CASE types text and quality_class cannot be matched
+LINE 31:  (CASE WHEN ty.avg_rating > 8 THEN 'star'
+ 
+* ERROR:  invalid input syntax for type integer: "tt13236566" 
+
+```
+CREATE TYPE film_stats AS (
+film TEXT[],
+votes INTEGER[],
+rating REAL[],
+filmid TEXT[]
+);
+
+CREATE TYPE quality_class AS ENUM('bad','average','good','star');
+
+CREATE TABLE actors (
+actor TEXT,
+actorid TEXT,
+current_year INTEGER,
+films film_stats[],
+quality_class TEXT,
+is_active BOOLEAN
+);
+
+WITH previous_year AS(
+	SELECT * FROM actors	
+	WHERE current_year = 2019
+),
+actor_films_ratings AS (
+SELECT *,
+ROUND(AVG(rating) OVER (PARTITION BY actorid)::numeric, 2) as avg_rating
+FROM actor_films
+WHERE year = 2020
+),
+this_year AS (
+SELECT 
+	actor,
+	actorid,
+	year,
+	min(avg_rating) as avg_rating,
+	array_agg(film) as film,
+	array_agg(votes) as votes,
+	array_agg(rating) as rating,
+	array_agg(filmid) as filmid
+
+FROM actor_films_ratings
+GROUP BY actor, actorid, year
+)
+SELECT 
+	COALESCE(py.actor, ty.actor) as actor,
+	COALESCE(py.actorid, ty.actorid) as actorid,
+	COALESCE(ty.year, py.current_year + 1) as current_year,
+	COALESCE(py.films, ARRAY[]::film_stats[]) || ARRAY[ROW(ty.film, ty.votes, ty.rating, ty.filmid)::film_stats] as films,
+	CASE WHEN ty.actorid IS NOT NULL THEN
+	(CASE WHEN ty.avg_rating > 8 THEN 'star'
+	     WHEN ty.avg_rating > 7 and ty.avg_rating <=8 THEN 'good'
+	     WHEN ty.avg_rating >6 and ty.avg_rating <=7 THEN 'average'
+	     ELSE 'bad' END)
+	ELSE py.quality_class
+	END as quality_class,
+	ty.actorid IS NOT NULL as is_active
+
+FROM previous_year py FULL OUTER JOIN this_year ty
+ON py.actorid = ty.actorid
+
+-- Repeat this query for multiple years
+
+CREATE TABLE actors_history_scd (
+actorid TEXT,
+actor TEXT,
+quality_class TEXT,
+is_active BOOLEAN,
+start_date INTEGER,
+end_date INTEGER,
+current_year INTEGER
+)
+
+WITH cte AS (
+
+SELECT 
+actor,
+actorid,
+current_year,
+quality_class,
+is_active,
+LAG(quality_class, 1) OVER (PARTITION BY actorid ORDER BY current_year) <> quality_class
+OR LAG(is_active, 1) OVER (PARTITION BY actorid ORDER BY current_year) <> quality_class
+OR LAG(quality_class, 1) OVER (PARTITION BY actorid ORDER BY current_year) IS NULL
+AS did_change,
+FROM actors
+
+)
+
+SELECT 
+actor,
+actorid,
+quality_class,
+is_active,
+current_year as start_date,
+LEAD(current_year, 1, 9999) OVER (PARTITION BY actorid ORDER BY current_year) as end_date,
+2021 AS current_year
+FROM cte
+WHERE did_change
+oRDER BY actorid, start_date;
+
+
+WITH previous_year AS (
+
+SELECT * FROM actors_history_scd
+WHERE current_year = 2020
+AND end_date = 2020
+),
+current_year AS (
+
+SELECT * FROM actors
+WHERE current_year = 2021
+
+)
+
+historical_scd AS
+(
+SELECT actor, actorid, quality_class, is_active, start_date, end_date
+
+
+FROM actors_history_scd
+WHERE current_year = 2020
+AND end_date < 2020
+
+),
+unchanged_records AS (
+
+SELECT py.actor, py.actorid, py.quality_class, py.is_active, py.start_date, ty.current_year as end_date
+FROM previous_year py INNER JOIN this_year ty
+ON py.actorid = ty.actorid 
+WHERE py.is_active = ty.is_active and py.quality_class = ty.quality_class
+),
+changed_records AS (
+SELECT 
+ty.actor,
+ty.actorid,
+UNNEST(ARRAY(ROW(py.quality_class, py.is_active, py.start_date, ty.current_year as end_date), ROW(ty.quality_class, ty.is_active, ty.current_year as start_date, ty.current_year as end_date)))
+
+FROM previous_year py INNER JOIN this_year ty
+ON py.actorid = ty.actorid
+WHERE py.is_active <> ty.is_active OR py.quality_class <> ty.quality_class
+
+),
+new_records AS (
+
+SELECT
+ty.actor, ty.actorid, ty.quality_class, ty.is_active, ty.current_year as start_date, ty.current_year as end_date
+FROM this_year ty left join previous_year py
+ON py.actorid = ty.actorid 
+WHERE py.actorid IS NULL
+
+)
+
+SELECT * FROM historical_scd
+UNION ALL
+SELECT * FROM unchanged_records
+UNION ALL
+SELECT * FROM changed_records
+UNION ALL
+SELECT * FROM new_records
+
+```
+
+
+### Doubts
+1. What is the syntax for creating table and deleting table in postgres?
+2. When to use TEXT vs VARCHAR?
+3. What are we doing the join bw current and previous year on and why? How to determine order in the coalesce - previous and current?
+4. Why cant you put index on a text column but put in on a varchar column in mysql?
+5. Can we directly apply coalesce on an array? 
+6. How to concatenate a row to an existing array in postgres?
+7. What if an actor has multiple films? How does ROW(cy.film, cy.votes) work in that scenario? (to solve this we have to use array_agg)
+8. How to determine if an actor is active or not? Can we use any column from this_year cte and check if it is null?
+9. What is struct type in postgres?
+10. When trying to do ROUND(AVG(rating),2) in postgres, it gives error function `round(double precision, integer) does not exist`. Why is this the case?
+11. How to define array of integers in postgres table?
+12. What is a form in Postgres?
+13. PostgreSQL is strictly typed environment - it is big difference from MSSQL procedures, where you can returns anything. What does this mean?
+14. How to define and use a procedure in postgres? When to use it?
+15. How to expand elements of a ROW into separate columns in Postgres? 
+
+### References
+1. https://stackoverflow.com/questions/25300821/difference-between-varchar-and-text-in-mysql
+2. https://www.postgresql.org/docs/current/rowtypes.html
+3. https://stackoverflow.com/questions/13113096/how-to-round-an-average-to-2-decimal-places-in-postgresql
+4. https://stackoverflow.com/questions/35338711/cannot-drop-table-users-because-other-objects-depend-on-it
+5. https://stackoverflow.com/questions/7162903/how-to-alter-a-columns-data-type-in-a-postgresql-table
+6. https://stackoverflow.com/questions/44852403/cannot-alter-composite-type-because-a-column-is-using-it
+7. https://dba.stackexchange.com/questions/22362/list-all-columns-for-a-specified-table
+8. https://stackoverflow.com/questions/32469937/how-to-add-new-column-with-data-on-existing-table
+9. https://neon.tech/docs/functions/array_agg
+10. https://stackoverflow.com/questions/24444008/how-can-you-expand-a-condensed-postgresql-row-into-separate-columns
+11. https://stackoverflow.com/questions/62709365/how-to-insert-a-row-in-the-middle-of-a-slowly-changing-dimension-type-2-based-on
+
+
 
 ## Day N
 ### Duration : 1.5 hours
@@ -795,5 +1020,15 @@ AdaptiveSparkPlan isFinalPlan=false
 6. https://stackoverflow.com/questions/67135876/how-many-cpu-cores-does-google-colab-assigns-when-i-keep-n-jobs-8-is-there-an
 7. https://www.reddit.com/r/apachespark/comments/1d57daf/how_to_decide_optimal_number_of_partitions/
 8. https://aspinfo.medium.com/how-to-improve-performance-with-bucketing-in-pyspark-c66a899e70b5
+
+
+## Day N + 5
+
+* How to do group by in Pyspark
+
+
+
+1. https://stackoverflow.com/questions/34514545/sort-in-descending-order-in-pyspark
+
 
 
