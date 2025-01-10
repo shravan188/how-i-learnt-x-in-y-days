@@ -805,8 +805,6 @@ sortedTwo = df.repartition(10, col("event_date"))\
 
 * We can use .explain() to see the query plan 
 
-empty room tomorrow
-
 ### Doubts
 1. How and when to implement custom partitioning in Pyspark?
 2. How to implement SCD Type 1 upsert in Pyspark? How about SCD Type 2?
@@ -1024,11 +1022,239 @@ AdaptiveSparkPlan isFinalPlan=false
 
 ## Day N + 5
 
-* How to do group by in Pyspark
+### Duration : 0.5 hours
 
+* Process : Process is an instance of a computer program that is being executed
 
+* Spark uses a master/slave architecture. It has one central coordinator (called Driver) that communicates with many distributed workers (called executors)
 
+* Node : A physical or virtual machine
+
+* Worker: Worker is actually a node or machine. Either you say it worker or worker node both are same
+
+* Executor : Executor is a process inside the worker node and a single worker node can have multiple executors. Spark executor is a single JVM instance on a node that serves a single spark application
+
+* Core(aka.Thread or Slot) : Core property controls the number of concurrent tasks an executor can run. For example if you request 2 executor each with 2 cores then you can run 4 concurrent tasks at the same time during your job execution.
+
+* Driver : 
+
+* Spark perform all its computation in memory. It would just spill the data to the disk only when it does not fit in memory
+
+* Partitions could be anywhere and might not be equally distributed in most of the cases.It could happen some of the executors does not have a single partition and other executors have more than 2 partitions.
+
+* Task : the lowest unit of work that performs the actual ask. 
+
+### Doubts
+1. What is difference bw worker and executor in Spark?
+2. Is the idea of a JVM associated with an executor process or at a higher "worker" level?
+3. A partition is a portion of the actual data. This split could happen using hashing, round robin or range. What determines the location of these data partitions?
+4. If I have less executors (say, 10) than the partitions (say, 20), does it mean that only 10 tasks will be executed in parallel at any point? is the degree of parallelism constrained by the number of executors?
+5. How to do group by in Pyspark
+6. How does bucketing look like in Spark dag?
+
+### References
 1. https://stackoverflow.com/questions/34514545/sort-in-descending-order-in-pyspark
+2.https://stackoverflow.com/questions/24696777/what-is-the-relationship-between-workers-worker-instances-and-executors
+3.https://stackoverflow.com/questions/68560515/what-is-the-relationship-between-a-node-worker-executor-task-and-partition
+
+
+## Day N + 6
+
+* Pyspark homework
+
+## Day P
+
+### Duration : 1.5 hours
+
+* Event store : An event store is a type of database optimized for storage of events
+
+* Stream processing : A data management technique that involves ingesting a continuous data stream to quickly analyze, filter or transform the data in real time. Once processed, the data is passed off to an application, data store or another stream processing engine.
+
+* Event sourcing : Event Sourcing is an architectural design pattern where changes that occur in a domain are immutably stored as events in an append-only log. In simple words, whenever there is a change (say for example Order Status changed from Pending to Paid), a new record is created in the database instead of overwriting the existing record
+
+* Apache Kafka : Apache Kafka is a distributed event store and stream-processing platform. 
+
+* Apache Flink : Apache Flink is a stream processing framework with powerful stream- and batch-processing capabilities
+
+* Apache Flink can connect with (i.e. write the data to) various storage backends such as
+   * Apache HDFS for batch access (with different storage format such as Parquet, ORC, custom binary) 
+   * Apache Kafka if you want to access the data as a stream 
+   * Key-value store such as Apache HBase and Apache Cassandra for point access to data 
+   * Databases such as MongoDB, MySQL, Postgresql
+
+* Journey to setup Flink for W4 lab
+   * Set environment variables in flink-env.env
+   * While trying to run docker compose faced following error `Docker | failed to solve with frontend dockerfile.v0: failed to create LLB definition: rpc error: code = Unknown desc`
+   * To solve issue, deleted docker config file - Went to `C:\Users\<Username>\.docker` and deleted config.json 
+   * Ran the following docker command (from folder containing dockerfile) : `docker compose --env-file flink-env.env up --build --remove-orphans  -d`
+   * Started the Postgres container from W1 and then ran the following SQL
+   ```
+   -- Create processed_events table
+   CREATE TABLE IF NOT EXISTS processed_events (
+      ip VARCHAR,
+      event_timestamp TIMESTAMP(3),
+      referrer VARCHAR,
+      host VARCHAR,
+      url VARCHAR,
+      geodata VARCHAR
+   );
+   ```
+
+###
+1. Is Flink just a processing library or can it also store data? In that sense is it similar to Spark, which is a processing library i.e. Spark only stores data temporarily in memory during processing and does not have a persistent storage?
 
 
 
+### References
+1. https://stackoverflow.com/questions/74583214/docker-failed-to-solve-with-frontend-dockerfile-v0-failed-to-create-llb-defin
+2. https://www.kurrent.io/event-sourcing
+3. https://stackoverflow.com/questions/34767316/can-we-use-apache-spark-to-store-data-or-is-it-only-a-data-processing-tool
+4. https://stackoverflow.com/questions/31951978/storage-in-apache-flink
+5. https://quix.io/blog/pyflink-deep-dive
+
+
+
+## Day P + 2
+## Duration : 2 hours
+
+### Learnings
+* Learnt the fundamental terms used in Kafka
+
+* Messages : The unit of data within Kafka is called a message. 
+
+* Kafka, at its core, only transfers data in byte format. There is no data verification that’s being done at the Kafka cluster level. In fact, Kafka doesn’t even know what kind of data it is sending or receiving; whether it is a string or integer
+
+* Topic : Named stream of records. Kafka topics are categories used to organize messages, and are analogous to tables in a database or folders in a filesystem
+
+* Partitioning : A single topic log is broken into multiple logs, each of which can live on a separate node in the Kafka cluster, and this is known as partitioning. This allows Kafka to be scalable, because if there was no partitioning, then a topic would be constrained to live entirely on one node, and would be limited to the size of that node. Partitions allow a topic's log to scale beyond a size that will fit on a single server (a broker) and act as the unit of parallelism. Hence Kafka is a distributed system, as it can handle multiple partitions stored across multiple nodes.
+
+* Messages are written to a partition in an append-only fashion and are read in order from beginning to end.
+
+* Producer : Producers create new messages. A message will be produced to a specific topic
+
+* Consumer : Applications that read data from Kafka topics are called consumers. The consumer subscribes to one or more topics and reads the messages in the order in which they were produced to each partition.
+
+* Offset : Kafka offsets are identifiers of messages within a Kafka partition. They represent the order of a message from the beginning of a partition. Hence each message in a Kafka topic has a partition ID and an offset ID attached to it
+
+* Offset commit :  Kafka allows consumers to use Kafka to track their position (offset) in each partition. The action of updating the current position in the partition is called an offset commit (just like we have commit operation in a database)
+
+* Consumer group : Consumers that are part of the same application and therefore performing the same "logical job" can be grouped together as a Kafka consumer group. In order for indicating to Kafka consumers that they are part of the same specific group , we must specify the consumer-side setting group.id.
+
+* Broker : A single Kafka server i.e. network of machines (physical or vm) is called a broker. Each broker hosts some set of partitions and handles incoming requests to write new events to those partitions or read events from them. In simpler words, broker receives messages from producers, assigns offsets to those messages, and writes the messages to storage on disk. On the consumer side, it responds to fetch requests for partitions and responds with the messages that have been published.
+
+* Cluster : Combination of Kafka brokers
+
+* Replication factor : A replication factor is the number of copies of same data stored over multiple brokers. This is similar to Spark, and is done so that even if one broker goes down, we still have backup copies of the data
+
+* Python libraries that can be used with Kafka include
+   * kafka-python
+   * confluent-kafka
+   * quixstreams
+
+* Quix Streams is an end-to-end framework for real-time Python data engineering, operational analytics and machine learning on Apache Kafka data streams. 
+
+* Bootstrap servers are Kafka brokers.
+
+* Steps followed to launch Apache Kafka using Docker
+   * Create the following docker-compose.yml file in a new folder
+
+```
+version: '2'
+
+services:
+  zookeeper:
+    image: wurstmeister/zookeeper:latest
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: wurstmeister/kafka:latest
+    ports:
+      - "9092:9092"
+    expose:
+      - "9093"
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka:9093,OUTSIDE://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_LISTENERS: INSIDE://0.0.0.0:9093,OUTSIDE://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CREATE_TOPICS: "my-topic:1:1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+```
+   * Open a terminal in the directory where the docker-compose.yml file is located and run the following command `docker-compose up -d`
+   * Run the following commands to create/list topics
+
+```
+## create a topic called my-topic
+docker exec -it <kafka-container-id> /opt/kafka/bin/kafka-topics.sh --create --zookeeper zookeeper:2181 --replication-factor 1 --partitions 1 --topic my-topic
+
+## list all topics in a cluster
+docker exec -it ccf45bb56f71 /opt/kafka/bin/kafka-topics.sh --list --zookeeper zookeeper:2181
+
+## list all topics in a cluster (pass the Kafka cluster address directly using the –bootstrap-server option)
+docker exec -it ccf45bb56f71 /opt/kafka/bin/kafka-topics.sh --list --bootstrap-server=localhost:9092
+
+## look at details of a specific topic (such as number of partitions and replicas)
+docker exec -it ccf45bb56f71 /opt/kafka/bin/kafka-topics.sh --
+bootstrap-server=localhost:9092 --describe --topic weather_data_demo
+
+```
+
+* Produced data to a Kafka topic using quixstreams library
+
+```
+# pip install requests
+# pip install quixstreams
+
+import requests
+import json
+from quixstreams import Application
+
+response = requests.get(
+    "https://api.open-meteo.com/v1/forecast",
+    params = {
+        "latitude":51.1,
+        "longitude":-0.11,
+        "current":"temperature_2m",
+    }
+)
+
+print(response.json())
+weather = response.json()
+
+app = Application(
+    broker_address="localhost:9092",
+    loglevel="DEBUG"
+)
+
+# producer is Kafka parlance for write-only connection
+with app.get_producer() as producer:
+    producer.produce(
+        topic="weather_data_demo",
+        key="London", # to identify the data
+        value=json.dumps(weather) 
+    )
+
+
+```
+
+### References
+
+1. https://medium.com/@amberkakkar01/getting-started-with-apache-kafka-on-docker-a-step-by-step-guide-48e71e241cf2
+2. https://medium.com/slalom-technology/introduction-to-schema-registry-in-kafka-915ccf06b902
+3. https://developer.confluent.io/courses/apache-kafka/partitions/
+4. https://www.redpanda.com/guides/kafka-architecture-kafka-offset
+5. https://learn.conduktor.io/kafka/kafka-consumer-groups-and-consumer-offsets/
+6. https://developer.confluent.io/courses/apache-kafka/brokers/
+7. https://github.com/ixaxaar/kafka-tutorial
+8. https://www.baeldung.com/ops/kafka-list-topics
+9. https://www.youtube.com/watch?v=D2NYvGlbK0M
+10. https://github.com/Sumanshu-Nankana/kafka-python/blob/main/src/producer.py
+
+
+
+
+https://quix.io/blog/pyflink-deep-dive
