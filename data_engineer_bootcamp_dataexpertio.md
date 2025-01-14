@@ -1022,7 +1022,10 @@ AdaptiveSparkPlan isFinalPlan=false
 
 ## Day N + 5
 
-### Duration : 0.5 hours
+### Duration : 1.5 hours
+* Spark mainly optimizes using 2 ways - by being distribted processing and by lazy evaluation. Important concepts linked to each of these are below
+   * Distributed processing : partitioning, rdd, architecture (worker node, driver, executor, core), repartition, coalesce, shuffle, broadcasting, bucket, Out of Memory (OOM) errors,  
+   * Lazy evaluation : DAG, Transformation, Action (Job, Stage, Task), Cache, Persist, Checkpoint, Salting , catalyst optimizer, predicate , partition pruning, 
 
 * Process : Process is an instance of a computer program that is being executed
 
@@ -1115,16 +1118,18 @@ AdaptiveSparkPlan isFinalPlan=false
 
 
 ## Day P + 2
-## Duration : 2 hours
+## Duration : 2.5 hours
 
 ### Learnings
 * Learnt the fundamental terms used in Kafka
 
 * Messages : The unit of data within Kafka is called a message. 
 
+* Event : What is called "event" in the streaming context (if we speak about Kafka Streams API) is a "message" in the normal Kafka usage. 
+
 * Kafka, at its core, only transfers data in byte format. There is no data verification that’s being done at the Kafka cluster level. In fact, Kafka doesn’t even know what kind of data it is sending or receiving; whether it is a string or integer
 
-* Topic : Named stream of records. Kafka topics are categories used to organize messages, and are analogous to tables in a database or folders in a filesystem
+* Topic : Named stream of records/collection of messages. Kafka topics are categories used to organize messages, and are analogous to tables in a database or folders in a filesystem
 
 * Partitioning : A single topic log is broken into multiple logs, each of which can live on a separate node in the Kafka cluster, and this is known as partitioning. This allows Kafka to be scalable, because if there was no partitioning, then a topic would be constrained to live entirely on one node, and would be limited to the size of that node. Partitions allow a topic's log to scale beyond a size that will fit on a single server (a broker) and act as the unit of parallelism. Hence Kafka is a distributed system, as it can handle multiple partitions stored across multiple nodes.
 
@@ -1138,13 +1143,24 @@ AdaptiveSparkPlan isFinalPlan=false
 
 * Offset commit :  Kafka allows consumers to use Kafka to track their position (offset) in each partition. The action of updating the current position in the partition is called an offset commit (just like we have commit operation in a database)
 
-* Consumer group : Consumers that are part of the same application and therefore performing the same "logical job" can be grouped together as a Kafka consumer group. In order for indicating to Kafka consumers that they are part of the same specific group , we must specify the consumer-side setting group.id.
+* Consumer group : Consumers that are part of the same application and therefore performing the same "logical job" can be grouped together as a Kafka consumer group. In order for indicating to Kafka consumers that they are part of the same specific group , we must specify the consumer-side setting group.id. Consumer groups are used for parallel processing of event messages from the specific topic.
+
+
+* Group coordinator :  Group coordinator (which is one of the brokers) helps to distribute the data in the subscribed topics to the consumer group instances evenly. The coordinator uses an internal Kafka topic to keep track of group metadata.
 
 * Broker : A single Kafka server i.e. network of machines (physical or vm) is called a broker. Each broker hosts some set of partitions and handles incoming requests to write new events to those partitions or read events from them. In simpler words, broker receives messages from producers, assigns offsets to those messages, and writes the messages to storage on disk. On the consumer side, it responds to fetch requests for partitions and responds with the messages that have been published.
 
 * Cluster : Combination of Kafka brokers
 
 * Replication factor : A replication factor is the number of copies of same data stored over multiple brokers. This is similar to Spark, and is done so that even if one broker goes down, we still have backup copies of the data
+
+* Kafka separates storage from compute. Storage is handled by the brokers and compute is mainly handled by consumers or frameworks built on top of consumers (like apache flink, kafka streams)
+
+* In one consumer group, each partition of a topic will be processed by one consumer only. These are the possible scenarios:
+   * `Num consumers > num topic partitions` : Some consumers will be idle 
+   * `Num consumers = num topic partitions` : Each consumer can work on one partition
+   * `Num consumers < num topic partitions` : Each consumer can work on multiple partition
+   In any case, there cannot be more than consumer for a single partition. Note that consumer should be aware of the number of partitions in a given topic
 
 * Python libraries that can be used with Kafka include
    * kafka-python
@@ -1241,6 +1257,10 @@ with app.get_producer() as producer:
 
 ```
 
+### Doubts
+1. What is the difference bw a topic and queue (as mentioned in reference 12)?
+2. What is the real world use case of consumers gorups vs a single consumer?
+
 ### References
 
 1. https://medium.com/@amberkakkar01/getting-started-with-apache-kafka-on-docker-a-step-by-step-guide-48e71e241cf2
@@ -1253,8 +1273,61 @@ with app.get_producer() as producer:
 8. https://www.baeldung.com/ops/kafka-list-topics
 9. https://www.youtube.com/watch?v=D2NYvGlbK0M
 10. https://github.com/Sumanshu-Nankana/kafka-python/blob/main/src/producer.py
+11. https://stackoverflow.com/questions/45196003/event-vs-topic-apache-kafka
+12. https://abhishek1987.medium.com/kafka-is-it-a-topic-or-a-queue-30c85386afd6
+13. https://medium.com/@emer.kurbegovic/queues-vs-topics-a-simple-guide-with-real-world-examples-1d32947cb574
+14. https://stackoverflow.com/questions/38024514/understanding-kafka-topics-and-partitions
+15. https://developer.confluent.io/courses/architecture/consumer-group-protocol/
+16. https://stackoverflow.com/questions/75390937/what-is-the-need-of-consumer-group-in-kafka
+
+## Day P + 3
+
+### Duration : 1 hour
+
+### Learnings
+
+* State : State means the current state of things. For example when you open a water bottle, the state is open, when you close it the state is closed. In Flink state enables to store information of past messages. State can be as simple as a flag or a complex object. For example:
+   * When an application searches for certain event patterns (say fraud detection in a bank), the state will store the sequence of events encountered so far (series of trasactions for the bank account)
+   * When aggregating events per minute, the state holds the pending aggregates.
+   * When training a machine learning model over a stream of data points, the state holds the current version of the model parameters.
+
+* Table API : For batch an stream processing, allows to write queries similar to SQL
+
+* DataStream API : Suitable for building stateful stream processing applications.  Stateful stream processing maintains a memory of past events. This memory, or "state", allows the processing system to track changes over time or across different data points.
+
+* Job : What work is done, basically a set of processes. A process is an instance of a program that is being executed (note that these are all operating system concepts)
+
+* A Flink datastream consists of multiple moving parts, including Sources, Sinks, and Operators. 
+
+* Source : Origin of the data
+
+* Sink : Database or streaming platform FLink writes to
+
+* The real power of Flink comes from its ability to transform data in a distributed streaming pipeline. Contains a variety of operators such as :
+   * Column operations (e.g., add, replace, remove, rename columns). 
+   * Row-based operations (e.g., map). 
+   * Aggregations such as grouping by clause and aggregating group rows.
+   * Joins (for example, inner, outer, and interval joins). 
+   * Windowing (e.g., sliding, tumbling, group windows).
+   * Customer operations using UDF 
+
+* Serialization : Process of transforming objects into compact, easily transmittable byte streams
+
+* Checkpoint : A mechanism to store states. This is triggered automatically at periodic intervals
+
+* Savepoint : Triggered manually by the user. Checkpoints are taken automatically and are used for automatic restarting job in case of a failure.whereas savepoints are taken manually, are always stored externally and are used for starting a "new" job
+
+### Doubts
+1. Does storing state meaning storing previous messages or storing info of the processing task?
+
+### References
+1. https://www.reddit.com/r/learnprogramming/comments/rem1ec/eli5_what_exactly_is_state/
+2. https://nightlies.apache.org/flink/flink-docs-release-1.3/dev/stream/state.html
+3. https://www.youtube.com/watch?v=VAhgOmyOyRY
+4. https://quix.io/blog/navigating-stateful-stream-processing
+5. https://quix.io/blog/pyflink-deep-dive
+6. https://stackoverflow.com/questions/3073948/job-task-and-process-whats-the-difference
+7. https://medium.com/@parinpatel094/wrangling-data-with-speed-a-deep-dive-into-apache-flinks-kryo-dadf5da81ab7
+8. https://www.alibabacloud.com/blog/flink-checkpoints-principles-and-practices-flink-advanced-tutorials_596631
 
 
-
-
-https://quix.io/blog/pyflink-deep-dive
