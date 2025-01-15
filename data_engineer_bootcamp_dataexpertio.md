@@ -1331,3 +1331,58 @@ with app.get_producer() as producer:
 8. https://www.alibabacloud.com/blog/flink-checkpoints-principles-and-practices-flink-advanced-tutorials_596631
 
 
+## Day P + 4
+### Duration : 1.25 hours
+
+### Learnings
+
+* Docker image : A lightweight, standalone, executable package of software that includes everything needed to run an application
+
+* Process : An instance of a program that is being executed. In simple words, a program in execution
+
+* Docker container : Container is simply an isolated process with all of the files it needs to run.  They provide a way of creating an isolated environment(sandbox) in which applications and their dependencies can live.
+
+* Container networking : Ability for containers to connect to and communicate with each other, or to non-Docker workloads.
+
+* User defined network : A custom network created by user to connect multiple containers.  We can create a docker network using `docker network create <network-name>`
+
+* Network drivers : Software that runs your networking hardware (they activates the actual transmission and receipt of data over the network). Some network drivers available in Docker are
+   * bridge : default one
+   * host : Remove network isolation between the container and the Docker host.
+
+* The execution of an application in Flink mainly involves three entities: the Client, the JobManager and the TaskManagers. 
+
+* Client : Client is responsible for submitting the application to the cluster, for example:
+   * Command line
+   * SQL client : For submitting SQL tasks to Flink (`sql-client.sh` in bin directory)
+   * Scala Shell : For submitting Table API tasks (`start-scala-shell.sh` in bin directory)
+
+* JobManager : Responsible for the necessary bookkeeping during execution i.e. keeps track of distributed tasks, decides when to schedule the next task/ tasks, and reacts to finished tasks or execution failures.
+
+* TaskManagers : The ones doing the actual computation.
+
+* Application mode : Spin up a Flink cluster for each submitted job, which is available to that job only. When the job finishes, the cluster is shut down and any lingering resources (e.g. files) are cleaned up. In Docker, in this mode, you start a Flink cluster that is dedicated to run only the Flink Jobs which have been bundled with the images
+
+* Session mode : Assumes an already running cluster and uses the resources of that cluster to execute any submitted application. Basically new application can be submiited on the go, and applications executed in the same session use same resources
+
+* To see which mode (application or sesssion) is used, in Docker look at the command key in docker-compose.yml
+
+* Dockerfile vs docker-compose.yml : Dockerfile is used to build images while the docker-compose.yaml file is used to run images. 
+
+* docker-compose can be considered a wrapper around the docker CLI. So instead of doing docker build on the Dockerfile, we have a `build : .` in docker-compose.yml
+
+### Doubts
+
+### References
+
+1. https://www.javatpoint.com/process-vs-program
+2. https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-a-container/
+3. https://docs.docker.com/engine/network/drivers/
+4. https://www.alibabacloud.com/blog/apache-flink-fundamentals-five-modes-of-client-operations_595729
+5. https://medium.com/@chunilalkukreja/apache-flink-application-vs-session-mode-35c830d9d49c
+6. https://flink.apache.org/2020/07/14/application-deployment-in-flink-current-state-and-the-new-application-mode/
+7. https://nightlies.apache.org/flink/flink-docs-master/docs/internals/job_scheduling/
+8. https://nightlies.apache.org/flink/flink-docs-master/docs/deployment/resource-providers/standalone/docker/
+9. https://www.theserverside.com/blog/Coffee-Talk-Java-News-Stories-and-Opinions/Dockerfile-vs-docker-compose-Whats-the-difference
+10. https://stackoverflow.com/questions/50230399/what-is-the-difference-between-docker-compose-build-and-docker-build
+11. https://stackoverflow.com/questions/29480099/whats-the-difference-between-docker-compose-vs-dockerfile
