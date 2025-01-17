@@ -1061,9 +1061,124 @@ AdaptiveSparkPlan isFinalPlan=false
 3.https://stackoverflow.com/questions/68560515/what-is-the-relationship-between-a-node-worker-executor-task-and-partition
 
 
-## Day N + 6
+## Day N + 6, N+7, N+8
+### Duration : 4 + 3 + 2 hours
 
-* Pyspark homework
+* Worked on and completed Pyspark homework
+
+* Errors faced :
+   * AMBIGUOUS_REFERENCE - Reference `match_id` is ambiguous. Cause : In the previous line join was done on match_id, hence 2 columns with the same name match_id. Solution : Changed the join statement, specify the join column as an array. This is similar to the USING keyword in SQL
+```
+# old expression
+matches_combined_df = matches_bucketed.join(match_details_bucketed, matches_bucketed.match_id == match_details_bucketed.match_id, "left")
+
+# new expression
+matches_combined_df = matches_bucketed.join(match_details_bucketed, ["match_id"], "left")
+
+```
+   * py4j.Py4JException: Method executePlan([class org.apache.spark.sql.catalyst.plans.logical.Filter]) does not exist, when running code below Cause : CHange in PySpark internals in newer version
+```
+catalyst_plan = matches_combined_df._jdf.queryExecution().logical()
+size_bytes = spark._jsparkSession.sessionState().executePlan(catalyst_plan).optimizedPlan().stats().sizeInBytes()
+```
+
+
+
+* If 2 tables have same column names, and if we are joining on those columns, then we can specify join columns in an array or use withColumnRenamed before join. The second approach can be used even if we are not joining on the column with same names (just like in the assignment)
+
+* To get size of a dataframe in MB we can use `df.explain('cost')`. 
+
+* To see version of Pyspark use `pyspark --version` in terminal (prefix with ! if jupyter notebook). Similarly `spark-submit --version` and `spark-shell --version` 
+
+
+```
+### Homework3.py
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import broadcast
+import pyspark.sql.functions as F
+
+# create spark session
+spark = SparkSession.builder.appName("homework").getOrCreate()
+
+# disable automatic broadcast join
+spark.conf.set("spark.sql.autoBroadcastJoinThreshold", -1)
+
+# load data
+maps = spark.read.option("header","true").csv("maps.csv")
+medals = spark.read.option("header","true").csv("medals.csv")
+matches = spark.read.option("header","true").csv("matches.csv")
+match_details = spark.read.option("header","true").csv("match_details.csv")
+medals_matches_players = spark.read.option("header","true").csv("medals_matches_players.csv")
+
+# store data in buckets for optimised join
+matches.write.mode("overwrite").bucketBy(16, "match_id").saveAsTable("matches_bucketed", format="parquet")
+match_details.write.mode("overwrite").bucketBy(16, "match_id").saveAsTable("match_details_bucketed", format="parquet")
+medals_matches_players.write.mode("overwrite").bucketBy(16, "match_id").saveAsTable("medals_matches_players_bucketed", format="parquet")
+
+# join bucketed tables
+# matches_bucketed = spark.read.parquet("matches_bucketed")
+matches_bucketed = spark.table("matches_bucketed")
+match_details_bucketed = spark.table("match_details_bucketed")
+medals_matches_players_bucketed = spark.table("medals_matches_players_bucketed")
+
+matches_combined_df = matches_bucketed.join(match_details_bucketed, ["match_id"], "left")
+matches_combined_df = matches_combined_df.join(medals_matches_players_bucketed, ["match_id", "player_gamertag"], "left")
+
+
+# broadcast join maps
+matches_combined_df = matches_combined_df.join(broadcast(maps), ["mapid"], "left")
+# broadcast join medals
+medals = medals.withColumnRenamed("name","medal_name")
+matches_combined_df = matches_combined_df.join(broadcast(medals), ["medal_id"], "left")
+
+# find player who averages the most kills per game
+avg_kills_df = matches_combined_df.groupBy("player_gamertag").agg(F.avg("player_total_kills").alias("avg_kills")).orderBy("avg_kills", ascending=False)
+
+# find playlist that gets played the most
+playlist_count_df = matches_combined_df.groupBy("playlist_id").agg(F.count("match_id").alias("playlist_count")).orderBy("playlist_count", ascending=False)
+
+# find map that gets played the most
+top_maps = matches_combined_df.groupby('mapid').count().orderBy("count", ascending=False).limit(3)
+
+# find map players get the most Killing Spree medals on
+killing_spree_df = matches_combined_df.filter(F.col("medal_name") == "Killing Spree")
+top_maps_ks = killing_spree_df.groupBy("mapid").agg(F.count("match_id").alias("killing_spree_medal_count")).orderBy("killing_spree_medal_count", ascending=False)
+
+# Try different .sortWithinPartitions to see which has the smallest data size
+matches_combined_df = matches_combined_df.repartition(4, F.col("completion_date")).sortWithinPartitions(F.col("completion_date"))
+print(matches_combined_df.explain('cost'))
+matches_combined_df = matches_combined_df.repartition(4, F.col("mapid")).sortWithinPartitions(F.col("mapid"))
+print(matches_combined_df.explain('cost'))
+matches_combined_df = matches_combined_df.repartition(4, F.col("match_id")).sortWithinPartitions(F.col("mapid"))
+print(matches_combined_df.explain('cost'))
+
+
+
+```
+
+* Py4j : Bridge between Apache Spark JVM codebase and Python client applications. PySpark's DataFrame has a private _jdf property which is an instance of Py4j's JavaObject referencing DataFrame instance on the JVM side
+
+* 
+
+### Doubts
+1. While joining 2 tables in Pyspark, how to handle same column name in both tables, when join is done on the common column and when the common column name is not the join key?
+2. SessionState is the state separation layer between Spark SQL sessions, including SQL configuration, tables, functions, UDFs, SQL parser, and everything else that depends on a SQLConf. What does this mean?
+3. When to use alias vs withColumnRenamed?
+4. What is the difference b/w SparkContext and SparkSession in Pyspark?
+
+### References
+1. https://stackoverflow.com/questions/33778664/spark-dataframe-distinguish-columns-with-duplicated-name
+2. https://kb.databricks.com/data/join-two-dataframes-duplicated-columns.html
+3. https://stackoverflow.com/questions/50287558/how-to-rename-duplicated-columns-after-join
+4. https://stackoverflow.com/questions/62411830/how-to-find-size-in-mb-of-dataframe-in-pyspark
+5. https://jaceklaskowski.gitbooks.io/mastering-spark-sql/content/spark-sql-SessionState.html
+6. https://stackoverflow.com/questions/62793652/select-number-of-partitions-on-basis-of-size-of-file-read-by-spark
+7. https://stackoverflow.com/questions/74192463/difference-between-alias-and-withcolumnrenamed
+8. https://www.waitingforcode.com/pyspark/pyspark-jvm-introduction-2/read
+9. https://stackoverflow.com/questions/54124386/capturing-the-result-of-explain-in-pyspark
+
+## Milestone - Successfully submitted Spark Homework on 15-Jan-2025
 
 ## Day P
 
@@ -1311,6 +1426,8 @@ with app.get_producer() as producer:
    * Windowing (e.g., sliding, tumbling, group windows).
    * Customer operations using UDF 
 
+* Transformation operations in Spark Streaming include : map(), flatMap(), filter(), repartition(numPartitions), union(otherStream), count(), reduce(), countByValue(), reduceByKey(func, [numTasks]), join(otherStream, [numTasks]), cogroup(otherStream, [numTasks]), transform(), updateStateByKey(), Window()
+
 * Serialization : Process of transforming objects into compact, easily transmittable byte streams
 
 * Checkpoint : A mechanism to store states. This is triggered automatically at periodic intervals
@@ -1329,7 +1446,7 @@ with app.get_producer() as producer:
 6. https://stackoverflow.com/questions/3073948/job-task-and-process-whats-the-difference
 7. https://medium.com/@parinpatel094/wrangling-data-with-speed-a-deep-dive-into-apache-flinks-kryo-dadf5da81ab7
 8. https://www.alibabacloud.com/blog/flink-checkpoints-principles-and-practices-flink-advanced-tutorials_596631
-
+9. https://data-flair.training/blogs/apache-spark-streaming-tutorial/
 
 ## Day P + 4
 ### Duration : 1.25 hours
@@ -1370,6 +1487,8 @@ with app.get_producer() as producer:
 * Dockerfile vs docker-compose.yml : Dockerfile is used to build images while the docker-compose.yaml file is used to run images. 
 
 * docker-compose can be considered a wrapper around the docker CLI. So instead of doing docker build on the Dockerfile, we have a `build : .` in docker-compose.yml
+
+
 
 ### Doubts
 
