@@ -83,10 +83,284 @@ It will append the `npm init` to `install` and overall command run is `npm init 
 7. Is the default shell for python:3.9 image a python shell instead of bash terminal?
 
 ### References
-1.https://stackoverflow.com/questions/46708721/do-all-docker-images-have-minimal-os
+1. https://stackoverflow.com/questions/46708721/do-all-docker-images-have-minimal-os
 2. https://serverfault.com/questions/755607/why-do-we-use-a-os-base-image-with-docker-if-containers-have-no-guest-os
 3. https://www.youtube.com/watch?v=1d-LRIZRf5s
 4. https://stackoverflow.com/questions/51066146/what-is-the-point-of-workdir-on-dockerfile
 5. https://www.youtube.com/watch?v=U1P7bqVM7xM
 6. https://stackoverflow.com/questions/21553353/what-is-the-difference-between-cmd-and-entrypoint-in-a-dockerfile
 7. https://www.geeksforgeeks.org/how-to-run-a-python-script-using-docker/
+
+
+
+## Day 2
+### Duration : 2.25 hours
+
+### Learnings
+* Environment variable : a user-definable value that can affect the way running processes will behave on a computer. In docker environment variables will be redeclared in each new containers
+
+* ENV (keyword in dockerfile): Set environment variables with some default value.
+
+* ENV values from the Dockerfile will be overridden via the CLI (using -e flag during docker run or env files)
+
+* ARG (keyword in dockerfile): Create build-time variables
+
+* ENV vs ARG :  ARG is for building your Docker image i.e. a variable defined using ARG can be assigned only during `docker build` and not during `docker run`. ENV is for future running containers. ENV is mainly meant to provide default values for your future environment variables, and these environment variables can be assigned new values during `docker run`
+
+* Docker Volume : Volumes are persistent data stores for containers, created and managed by Docker. In simple words, when you stop and start a container, the data inserted previously is not lost (hence used to solve issue of data persistence)
+```
+# volume-name is path of data in host system
+# mount-path is path of data in docker container
+docker run --volume <volume-name>:<mount-path>
+```
+
+* The command to create a postgres container with volume is as follows (will be used to store nyc taxi data)
+
+```
+# the same thing can also be done using docker-compose.yml
+docker run -it \
+    -e POSTGRES_USER="root" \
+    -e POSTGRES_PASSWORD="root" \
+    -e POSTGRES_DB="ny_taxi" \
+    -v C:\Users\Dell\Documents\ny_taxi_postgres_data:/var/lib/postgresql/data
+    -p 5432:5432
+    postgres:13
+
+```
+
+* Errors faced
+    * ``docker: invalid reference format`  Cause: `-v ($pwd)/ny_taxi_postgres_data:var/lib/postgresql/data` and `-e POSTGRES_USER = "root"` Solution : remove space around = 
+    * `invalid mount config for type "volume": invalid mount path: 'var/lib/postgresql/data' mount path must be absolute`.
+    * `docker: Error response from daemon: create $(pwd)/ny_taxi_postgres_data: "$(pwd)/ny_taxi_postgres_data" includes invalid characters for a local volume name, only "[a-zA-Z0-9][a-zA-Z0-9_.-]" are allowed. If you intended to pass a host directory, use absolute path`. Solution : Give full path instead of $(pwd) in Windows,
+    * `ModuleNotFoundError: No module named 'psycopg2' while running upload_data.py ` Solution: pip install psycopg2
+
+
+```
+pip install pgcli
+
+pgcli -h localhost -p 5432 -u root -d ny_taxi
+
+# test connection to running database
+SELECT 1; 
+```
+
+* Following is the Python code to insert tripdata from csv file into Postgres database
+
+```
+### upload_data.py 
+import pandas as pd
+
+from sqlalchemy import create_engine
+from time import time
+
+df = pd.read_csv('yellow_tripdata_2021-01.csv', nrows=100)
+
+print(pd.io.sql.get_schema(df, name='yellow_taxi_data', con=engine))
+
+# postgresql://user:password@hostname/database_name
+engine = create_engine('postgresql://root:root@localhost:5432/ny_taxi')
+
+df_iter = pd.read_csv('yellow_tripdata_2021-01.csv', iterator=True, chunksize=100000)
+
+while True: 
+    t_start = time()
+
+    df = next(df_iter)
+
+    df.tpep_pickup_datetime = pd.to_datetime(df.tpep_pickup_datetime)
+    df.tpep_dropoff_datetime = pd.to_datetime(df.tpep_dropoff_datetime)
+    
+    df.to_sql(name='yellow_taxi_data', con=engine, if_exists='append')
+
+    t_end = time()
+
+    print('inserted another chunk, took %.3f second' % (t_end - t_start))
+
+# Using pgcli we see total of 1369765 records using select count(*) from yellow_taxi_data;
+
+```
+
+### Doubts
+1. Where exactly in the DOCKERFILE are the environment variables used when we type `docker run -e POSTGRES_USER=root`
+2. What is difference bw ENV and ARG in dockerfile? 
+
+
+### References
+1. https://vsupalov.com/docker-arg-env-variable-guide/
+2. https://docs.docker.com/reference/dockerfile/
+3. https://stackoverflow.com/questions/33935807/how-to-define-a-variable-in-a-dockerfile
+4. https://stackoverflow.com/questions/41916386/arg-or-env-which-one-to-use-in-this-case
+5. https://stackoverflow.com/questions/34809646/what-is-the-purpose-of-volume-in-dockerfile
+6. https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page
+7. https://github.com/DataTalksClub/nyc-tlc-data
+8. https://stackoverflow.com/questions/45682010/docker-invalid-reference-format
+9. https://stackoverflow.com/questions/9353822/connecting-postgresql-with-sqlalchemy
+
+## Day 3
+
+### Duration : 3 hours
+### Learnings
+* Pgcli : Pgcli is a command line interface for Postgres, built using Python
+
+* Port : A virtual point where network connections start and end. 
+
+* Port number : A 16-bit integer that serves as a unique identifier for a specific proces/service/application on a networked device.
+
+* Port mapping : By default, when we create or run a container using docker create or docker run, containers on bridge networks don't expose any ports to the outside world. The -p flag makes a port available to services outside the bridge network.
+```
+# -p HOST_PORT:CONTAINER_PORT
+-p 8080:80	Map port 8080 on the Docker host to TCP port 80 in the container.
+```
+
+* Inspect Postgres database using pgcli as shown below
+
+
+```
+# Connect to running database by providing : Host, port, username, database
+pgcli -h localhost -p 5432 -u root -d ny_taxi
+
+select * from information_schema.tables;
+
+
+select column_name, data_type from information_schema.columns where table_name='yellow_taxi_data'
+
+
+```
+
+* Pgadmin : A tool for managing Postgres. Provides graphical interface to create and update database objects (tables, schema etc)
+
+* PgAdmin 4 docker container has exposed port 80 and 443 by default (refer DOCKERFILE of pgadmin). Hence we map port 8080 of our computer to port 80 of pgadmin
+
+```
+
+docker run -it \
+    -e PGADMIN_DEFAULT_EMAIL="admin@admin.com" \
+    -e PGADMIN_DEFAULT_PASSWORD="root" \
+    -p 8080:80 \
+    dpage/pgadmin4
+
+```
+
+
+* Docker Network : A virtual network created by Docker to enable communication between Docker containers. If two processes are running on same machine/container, then no need of network, but two different containers are like 2 separate machines, hence we need to create a network. If two containers are running on the same host they can communicate with each other without the need for ports to be exposed to the host machine.
+
+* TO connect pgadmin to postgres container, we need to create a docker network and connect both the containers to the same docker network
+as shown below (environment variables have been e)
+```
+# create a network
+docker network create pg-network
+
+# connect an existing container to the network
+docker network connect pg-network competent_germain
+
+# docker rename competent_germain pg_database_1
+
+# see details about network like driver, list of connected containers, etc
+docker inspect pg-network
+
+# connect a new container with network using network flag
+docker run -it \
+    -e PGADMIN_DEFAULT_EMAIL="admin@admin.com" \
+    -e PGADMIN_DEFAULT_PASSWORD="root" \
+    -p 8080:80 \
+    --network pg-network \
+    --name pg-admin \
+    dpage/pgadmin4
+
+```
+
+* Steps for using pgadmin are
+    1. Login using email and password listed above
+    2. Click on Add New Server
+    3. Give a name to connection in General tab
+    4. In Connection tab, enter following details
+        * Host name: IP address of postgres container
+        * Port : 5432
+        * Username : username of postgres database
+        * Password : password of postgres database
+    5. Click on Save
+    6. Select Query Tool icon at left top 
+
+
+* `Error : Unable to connect to server, name does not resolve in pgadmin4` Solution: Make sure the postgres container is running. Get the id of the container and do `docker inspect <container-id>`. Copy the IPv4 address and paste it into the Host Name field
+
+* Data serialization : Process of converting an object into a stream of bytes to more easily save or transmit it. 
+
+* YAML (YAML Ain't Markup Language) : A human-readable and human-writable data interchange format for storing and transmitting the information
+
+* YAML has two top-level elements, an object and array
+    * Object : a collection of key-value pairs. Each key is followed by :
+    * Array : ordered list of values, with each item preceded by -
+ JSON and YAML are very similar
+
+* Service : abstract definition of a resource within an application for example a database or a web app frontend or a web app backend
+
+* A service can be run by one or multiple containers. With docker you can handle containers and with docker-compose you can handle services.
+
+* Using docker-compose, we can create the same containers above instead of having to create each container separately, as shown below. Docker compose saves us from writing kilometre long run statement from the terminal, and can be considered as a wrapper around docker cli which makes our lives easier
+
+```
+# docker-compose.yml
+services:
+    pgdatabase:
+        image: postgres:13
+        environment:
+            - POSTGRES_USER=root
+            - POSTGRES_PASSWORD=root
+            - POSTGRES_DB=ny_taxi
+        volumes:
+            - "./ny_taxi_postgres_data:/var/lib/postgresql/data:rw"
+        ports:
+            - "5432:5432"
+    
+    pgadmin:
+        image: dpage/pgadmin4
+        environment:
+            - PGADMIN_DEFAULT_EMAIL=
+            - PGADMIN_DEFAULT_PASSWORD=root
+        ports:
+            - "8080:80"
+        
+# To run : docker-compose up -d
+# To down: docker-compose down
+```
+* If we do not use network top level element, docker compose automatically creates a network
+
+* By default docker just manages the volume to host mapping for you i.e. where in the host system the volume is stored.
+
+* (Is this correct?)We add a volume for pgadmin so that we don't have to continually add the connection every time you bring it up. The pgadmin_conn_data volume is separate from your PostgreSQL volume (ny_taxi_postgres_data). The PostgreSQL volume is used to persist data from your PostgreSQL database, while the pgadmin_conn_data volume is used to persist data from your PgAdmin application. 
+
+* Using network top level element in dcoker-compose we can name the network name in the compose file (useful when we want to access it from another container)
+```
+docker volume ls
+
+docker volume inspect volume-name
+
+docker network ls
+
+```
+
+* 3 major docker concepts : container, network, volume
+
+### Doubts
+1. What is difference bw process, service and application?
+2. What is differnece bw physical and virtual network?
+3. What is the use case for docker network drivers other than bridge (like host, none, etc)?
+4. How to add a docker container which has already been created to a new docker network?
+5. Why ports in docker-compose wrapped in double quotes? In general when to and not to use double quotes in docker-compose yml file?
+6. What is difference bw service and container in docker-compose?
+7. For volumes why no need of full path in docker compose for pgdatabase?
+8. What is the difference bw volume and bind mount?
+
+### References
+1. https://docs.docker.com/engine/network/
+2. https://superuser.com/questions/209654/whats-the-difference-between-an-application-a-process-and-a-service
+3. https://github.com/pgadmin-org/pgadmin4/blob/master/Dockerfile
+4. https://stackoverflow.com/questions/48046585/docker-pgadmin-4
+5. https://www.geeksforgeeks.org/basics-of-docker-networking/
+6. https://stackoverflow.com/questions/50721424/how-to-add-containers-to-same-network-in-docker
+7. https://stackoverflow.com/questions/57109494/unable-to-connect-to-server-pgadmin-4
+8. https://deepsource.com/glossary/yaml
+9. https://stackoverflow.com/questions/35565770/difference-between-service-and-container-in-docker-compose
+10. https://www.reddit.com/r/docker/comments/11fm9zr/help_me_understand_dockercompose_named_volumes/
+11. https://kinsta.com/blog/docker-compose-volumes/
