@@ -364,3 +364,190 @@ docker network ls
 9. https://stackoverflow.com/questions/35565770/difference-between-service-and-container-in-docker-compose
 10. https://www.reddit.com/r/docker/comments/11fm9zr/help_me_understand_dockercompose_named_volumes/
 11. https://kinsta.com/blog/docker-compose-volumes/
+
+
+## Day 4
+### Duration : 1 hour
+
+* Cloud Infrastructure : Hardware/software in cloud such as storage, server, compute, networking etc
+
+* Infrastructure as Code(IaC) : Practice where infrastructure is managed and provisioned using code rather than manual processes. By storing infrastructure code in version control system, we can ensure infrastructure changes are trackable
+
+* Terraform : IaC tool which allows users to provision and manage infrastructure resources across various cloud platforms (and even on prem)
+
+* HCL (HashiCorp Configuration Language) : Language used in Terraform
+
+* State file : Stores info about infrastructure's configuration and status (i.e. things like resources that have been created, their current properties) Named `terraform.tfstate `
+
+* Important Terraform CLI commands:
+    * `terraform fmt`: Format terraform code
+    * `terraform init` : Beginning of project or we decide to add more providers or change the version of existing ones 
+    * `terraform plan` : Compares the code with the state file to identify and highlight resources that will be created, updated, or deleted if we choose to execute the current version of the code. ALso goes through configuration files and identify syntax errors/version mismatch
+    * `terraform apply` : Actually execute code to create/delete resources on cloud
+    * `terraform destroy`
+
+* Basic workflow : init -> plan -> apply
+
+* Plugin :  A piece of software that extends functionality of existing software/provides additional functionality eg. Grammarly, OneTab, Sceenshot of entire page(Chrome), Adblocker
+
+* Provider : Plugin that enables interaction with an API and thus allows it to manage infra on any platform eg. AWS Provider to manage resources on AWS
+
+* Resource :  Infrastructure objects (like virtual networks or compute instances)
+
+* Module : Container for multiple resources that are used together (can include resources from the same provider or different providers)
+
+* Below is code to create a simple GCP Cloud Storage Bucket using Terraform
+```
+### main.tf
+
+terraform {
+    required_providers{
+        google = {
+            source="hashicorp/google"
+            version="5.5.5"
+        }
+    }
+}
+
+provider "google" {
+    credentials = "./keys/my-creds.json"
+    project = "gcp-project-id"
+    region = "us-central1"
+}
+
+resource "google_storage_bucket" "demo-bucket" {
+    name = "bucket-name" # must be globally unique across all of gcp
+    location = "US"
+    force_destroy = true
+
+}
+
+```
+
+
+### Doubts
+1. What does declarative syntax mean? And how is it different from imperative?
+2. How exactly is terraform cloud agnostic and be used to automate multi cloud deployment? How does it map say cloud storage in GCP to S3 in AWS? 
+
+### References
+1. https://spacelift.io/blog/terraform-tutorial
+2. https://dzone.com/articles/an-introduction-to-terraforms-core-concepts
+
+
+
+## Day 4 and 5
+### Duration : 1 + 1 hour
+* Apache Airflow and Kestra are an open-source data orchestration and scheduling platforms to manage complex data flows
+
+* Orchestration (remember orchestra where coordination is imp.) : Coordination and management of multiple applications and services, stringing together multiple tasks in order to execute a larger workflow or process
+
+* Data orchestration : Programmatically author, schedule, and monitor workflows.
+
+* Task : Step/action to be performed eg. download data, transform data. Two types
+    * Flowable tasks: Tasks which orchestrate the flow eg. io.kestra.plugin.core.flow.Parallel
+    * Runnable tasks: Tasks which perform actual work/take some action eg. io.kestra.plugin.scripts.shell.Commands to execute shell commands
+
+
+* Some properties of task include: id, type,  
+
+* Namespace : Logical grouping of flows eg. based on team
+
+* Flow : Container/Grouping for set of tasks, their inputs and outputs and associated error handling. Defines the order in which tasks are executed and how they are executed (i.e. parellel, sequential)
+
+* Variable : Key value pair to reuse value across tasks
+
+* Namespace variable : Variables whose scope is limited to specific namespace. Namespace variables have to be defined via Kestra UI and not via YML file
+
+* Trigger : Mechanism to automate execution of a flow (schedule driven or event driven)
+
+* States: Control status of your workflow execution
+
+* Template engine : A template engine enables you to use static template files in your application. At runtime, the template engine replaces variables in a template file with actual values
+
+* Pebble : Java templating engine, similar to Jinja in Python
+
+* Expression : Used to dynamically pass data to the workflow in real time. Uses Pebble, hence expression must be wrapped in {{}}. 
+
+* Some variables which exist by default and need not be created explicitly are `flow`, `inputs`, `outputs`, `tasks`. In example below the inputs variable is used
+
+```
+## inputs.name is an expression which allows Kestra to use the name passed by end user in real time in the logging task
+id: myflow
+namespace: company.team
+
+inputs:
+    - id: name
+      type: STRING
+
+tasks:
+    - id: hello
+      type: io.kestra.plugin.core.log.log
+      message: "Hello {{ inputs.name }}"
+
+
+```
+
+* If a variable uses a Pebble expression, we must use render() function when using that variable
+
+```
+id: myflow
+workspace: company.team
+
+variables:
+    file: "{{inputs.taxi}}_tripdata_{{inputs.year}}-{{inputs.month}}.csv"
+
+
+tasks:
+    - id: set_label
+      type: io.kestra.plugin.core.execution.Labels
+      labels:
+        file: "{{render(vars.file)}}" # since file uses Pebble expression, use render function
+        taxi: "{{inputs.taxi}}"
+
+```
+
+* There are multiple types of tasks available, and each has its own set of  properties. Refer Kestra documentation
+
+```
+id: postgres-taxi
+namespace: zoomcamp
+
+inputs:
+    - id: taxi
+      displayName: Select taxi type
+      values: ['yellow','green']
+      defaults: 'yellow'
+
+    - id: year
+      displayName: Select year
+      values: ['2019','2020']
+      defaults: '2019'
+
+    - id: month
+      displayName: Select month
+      values: ['01','02', '03', '04', '05', '06', '07']
+      defaults: '01'
+
+
+variables:
+    file: "{{inputs.taxi}}_tripdata_{{inputs.year}}-{{inputs.month}}.csv"
+    
+```
+
+* No need of remembering all the task types, just know the high level logic to implement, rest can be gooten from documentation
+
+* In staging table, we create a unique row id for each row by concatenating all the column values and using md5(instead of using uuid)
+
+
+### Doubts
+1. What is purpose of staging table?
+2. What are static files (in context of Jinja)?
+3. What is difference between static and dynamic task?
+4. What is truncate table in SQL? What is update statement in SQL?
+5. What is the difference bw merge and insert in SQL?
+
+### References
+1. https://medium.com/geekculture/airflow-vs-prefect-vs-kestra-which-is-best-for-building-advanced-data-pipelines-40cfbddf9697
+2. https://expressjs.com/en/guide/using-template-engines.html
+3. https://kestra.io/docs/expressions
+
