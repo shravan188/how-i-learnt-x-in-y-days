@@ -1,7 +1,9 @@
 # Data Engineering Zoomcamp (by DataTalks Club)
-### Duration : 1.5 hours
 
 ## Day 1
+### Duration : 1.5 hours
+* Started the Zoomcamp on 16-Jan-2024
+
 * To run an Ubuntu container in docker : `docker run -it ubuntu bash`.The docker run command automatically pulls and runs the image without the need to run docker pull first. 
 
 ```
@@ -324,6 +326,19 @@ services:
 # To run : docker-compose up -d
 # To down: docker-compose down
 ```
+
+* Useful docker-compose commands
+
+```
+# Stop services only
+docker-compose stop
+
+# Stop and remove containers, networks..
+docker-compose down 
+
+# Down and remove volumes
+docker-compose down --volumes 
+```
 * If we do not use network top level element, docker compose automatically creates a network
 
 * By default docker just manages the volume to host mapping for you i.e. where in the host system the volume is stored.
@@ -340,6 +355,8 @@ docker network ls
 
 ```
 
+
+
 * 3 major docker concepts : container, network, volume
 
 ### Doubts
@@ -351,6 +368,7 @@ docker network ls
 6. What is difference bw service and container in docker-compose?
 7. For volumes why no need of full path in docker compose for pgdatabase?
 8. What is the difference bw volume and bind mount?
+9. What is difference bw stop and down in docker-compose command?
 
 ### References
 1. https://docs.docker.com/engine/network/
@@ -364,6 +382,7 @@ docker network ls
 9. https://stackoverflow.com/questions/35565770/difference-between-service-and-container-in-docker-compose
 10. https://www.reddit.com/r/docker/comments/11fm9zr/help_me_understand_dockercompose_named_volumes/
 11. https://kinsta.com/blog/docker-compose-volumes/
+12. https://stackoverflow.com/questions/46428420/docker-compose-up-down-stop-start-difference
 
 
 ## Day 4
@@ -432,7 +451,7 @@ resource "google_storage_bucket" "demo-bucket" {
 ### References
 1. https://spacelift.io/blog/terraform-tutorial
 2. https://dzone.com/articles/an-introduction-to-terraforms-core-concepts
-
+3. https://www.reddit.com/r/Terraform/comments/17xcpvq/can_someone_help_me_explain_when_is_terraform/
 
 
 ## Day 4 and 5
@@ -551,3 +570,274 @@ variables:
 2. https://expressjs.com/en/guide/using-template-engines.html
 3. https://kestra.io/docs/expressions
 
+
+## W1 Homework (Day 4,5,6)
+
+* Worked on Week 1 Homeowrk
+
+* Question 1
+```
+-- 24.3.1
+docker run -it --entrypoint=bash python:3.12.8
+pip -V
+```
+
+* Question 2
+
+We can use IP address of host instead of `host.docker.internal`. But in reality, host.docker.internal is not just a hostname that directly points to the IP address of your host. It will point to the “host gateway” which can be configured but it is 172.17.0.1 by default which is the gateway of the default docker bridge. On pinging it will return something like 192.168.65.254 depending on the subnet of Docker Desktop and not 172.17.0.1 because in Docker Desktop the ---host-gateway-ip parameter is set to a proxy ip and forward any request sent to any port to your host machine’s localhost probably using unix sockets and TCP sockets together.
+
+```
+docker-compose up -d
+
+pgcli -h localhost -p 5433 -u postgres -d ny_taxi
+```
+
+
+* Question 3
+```
+-- 104830 ()
+select count(*) 
+from green_taxi_data
+where lpep_pickup_datetime::date >= '2019-10-01' and lpep_pickup_datetime::date < '2019-11-01' and trip_distance <= 1
+number not matching any option because only considered pickup time and not drop off time
+
+-- 12 rows not in 2019
+select count(*)
+from green_taxi_data
+where date_part('year', lpep_pickup_datetime::date) <> '2019'
+
+In 2019 Nov data why are there 2008 data? What do we do with dirty data?
+
+-- 104,802; 198,924; 109,603; 27,678; 35,189
+select 
+	sum(case when trip_distance <= 1 then 1 else 0 end) as "Up to 1 mile",
+	sum(case when trip_distance > 1 and trip_distance <=3 then 1 else 0 end) as "1 - 3 miles",
+	sum(case when trip_distance > 3 and trip_distance <=7 then 1 else 0 end) as "3 - 7 miles",
+	sum(case when trip_distance > 7 and trip_distance <=10 then 1 else 0 end) as "7 - 10 miles",
+	sum(case when trip_distance > 10 then 1 else 0 end) as "Over 10 miles"
+from green_taxi_data
+where lpep_pickup_datetime::date >= '2019-10-01' and 
+lpep_pickup_datetime::date < '2019-11-01' and
+lpep_dropoff_datetime::date >= '2019-10-01' and 
+lpep_dropoff_datetime::date < '2019-11-01' 
+
+
+-- 104,802; 198,924; 109,603; 27,678; 35,189
+-- notice the use of single quotes since these are values and not column names
+select 
+	case when trip_distance <= 1 then 'Up to 1 mile'
+		when trip_distance > 1 and trip_distance <=3 then  '1 - 3 miles'
+		when trip_distance > 3 and trip_distance <=7 then  '3 - 7 miles'
+		when trip_distance > 7 and trip_distance <=10 then '7 - 10 miles'
+		when trip_distance > 10 then 'Over 10 miles'
+		end as trip_segment,
+	count(*) as trip_count
+from green_taxi_data
+where lpep_pickup_datetime::date >= '2019-10-01' and 
+lpep_pickup_datetime::date < '2019-11-01' and
+lpep_dropoff_datetime::date >= '2019-10-01' and 
+lpep_dropoff_datetime::date < '2019-11-01' 
+group by trip_segment
+
+
+```
+* Question 4
+
+```
+
+-- 2019-10-31, trip distance was 515.89
+select lpep_pickup_datetime::date
+from green_taxi_data
+where trip_distance = (select max(trip_distance) from green_taxi_data)
+```
+
+* Question 5
+
+```
+-- East Harlem North, East Harlem South, Morningside Heights
+select "PULocationID", sum(total_amount)
+from green_taxi_data
+where lpep_pickup_datetime::date = '2019-10-18'
+group by "PULocationID"
+having sum(total_amount) > 13000
+order by sum(total_amount) desc
+
+-- East Harlem North, East Harlem South, Morningside Heights
+with top_pickups as 
+(
+    select 
+        "PULocationID", 
+        sum(total_amount)
+    from green_taxi_data
+    where lpep_pickup_datetime::date = '2019-10-18'
+    group by "PULocationID"
+    having sum(total_amount) > 13000
+    order by sum(total_amount) desc
+)
+select 
+    * 
+from 
+    top_pickups tp 
+left join 
+    taxi_zone_lookup tzl
+on tp."PULocationID" = tzl."LocationID"
+
+-- JFK Airport
+with EastHarlemPU as (
+    select *
+    from 
+    green_taxi_data
+    where "PULocationID" = (select "LocationID" from taxi_zone_lookup where "Zone"='East Harlem North')
+)
+select 
+	"Zone"
+from 
+	EastHarlemPU ehp 
+left join 
+    taxi_zone_lookup tzl
+on ehp."DOLocationID" = tzl."LocationID"
+where ehp.tip_amount = (select max(tip_amount) from EastHarlemPU)
+```
+
+* Question 6
+```
+terraform init, terraform apply -auto-approve, terraform destroy
+```
+
+* Errors encountered
+    * The container name "/pgadmin" is already in use by container "48c18c4276460544bb186b48247a63ff9776514adbbb142429ea14b6a09a0fb5". You have to remove (or rename) that container to be able to reuse that name - Cause: There was already another container with the name pgadmin
+    * Unable to connect to server.Connection to server 172.26.0.3 failed (when trying to connect to Postgres from pgadmin New Server connection menu)
+    * DtypeWarning: Columns (3) have mixed types. Specify dtype option on import or set low_memory=False.
+
+
+
+* We can get date from timestamp by using type casting
+
+* PostgreSQL converts all names (table name, column names etc) into lowercase if you don't prevent it by double quoting them. Hence if we have table or column names with upper case characters, we must put them in double quotes so that postgres does not convert them to lowercase
+
+* Single quotes for string values, double quotes for column, table names
+
+* The terraform apply command performs a plan just like terraform plan does, but then actually carries out the planned changes to each resource using the relevant infrastructure provider's API. It asks for confirmation from the user before making any changes, unless it was explicitly told to skip approval.
+
+
+### Doubts
+1. How to extract date from datetime in Python?
+2. WHat does negative trip_dotsance and total_amount mean?
+3. What does host.docker.internal mean?
+4. How to check netowrk request to docker container? Why when we enter name of container in pgadmin server connection, why is it not working, but host.docker.internal is working?
+5. How to get date from timestamp in postgres
+6. How to get year from date in postgres? Why is year function not working?
+7. Should all column names be in double quotes?
+
+### References
+1. https://forums.docker.com/t/host-docker-internal-in-production-environment/137507/2
+2. https://stackoverflow.com/questions/31697828/docker-name-is-already-in-use-by-container
+3. https://stackoverflow.com/questions/6133107/extract-date-yyyy-mm-dd-from-a-timestamp-in-postgresql
+4. https://stackoverflow.com/questions/36203613/how-to-extract-year-from-date-in-postgresql
+5. https://stackoverflow.com/questions/55297807/when-do-postgres-column-or-table-names-need-quotes-and-when-dont-they
+
+## Milestone : Submitted Homework 1 on 24-Jan-2025
+
+## Day 7
+
+### Learnings
+* Learnt about basic GCP concepts
+
+* Project : A project is logical container for organizing and managing resources (provides a secure and isolated environment for deploying applications, storing data, and managing access controls)
+
+* Folder : Folder resources optionally provide an additional grouping mechanism and isolation boundaries between projects. They can be seen as sub-organizations within the organization resource. Folder resources can be used to model different legal entities, departments, and teams within a company.
+
+* Service account : A service account is an account for an application or machine instead of an human user
+
+* IAM : IAM enables us to manage access control by defining who (identity) has what access for which resource(role)
+
+* Identity : Identity represents a human user or programmatic workload that can be authenticated and then authorized to perform actions
+
+* Principal (aka members) : A principal represents an identity (in simple words person) that can access a resource.
+
+* Role :  A set of permissions that allows you to perform specific actions on Google Cloud resources (can be further classified into basic, predefined and custom)
+
+* Policy : Policy defines and enforces what roles are granted to which principals (has allow and deny policy)
+
+* In IAM, permission to access a resource isn't granted directly to the end user. Instead, permissions are grouped into roles, and roles are granted to authenticated principals. For example principal user@example.com is granted the role `roles/bigquery.resourceAdmin` (i.e. BigQuery Admin). Note that if the allow policy is attached to a project, the principals gain the specified roles within the project.
+
+* Steps to generate credentials for Service account : Service Account > Actions > Manage keys > Create New key > JSON . Never ever share service account key as anyone can use our resources and mine bitcoins 
+
+```
+# main.tf
+terraform {
+    required_providers{
+        google={
+            source="hashicorp/google"
+            version="5.6.0"
+        }
+    }
+}
+
+provider "google"{
+    credentials = "./my-creds.json" // service account creds
+    project = "terraform-demo-448805"
+    region = "us-central1"
+}
+
+# demo-bucket need not be globally unique, but name must be globally unique
+resource "google_storage_bucket" "demo-bucket" {
+  name          = "terraform-demo-448805-terra-bucket"
+  location      = "US"
+  force_destroy = true
+
+  lifecycle_rule {
+    condition {
+      age = 3
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  lifecycle_rule {
+    condition {
+      age = 1
+    }
+    action {
+      type = "AbortIncompleteMultipartUpload"
+    }
+  }
+}
+
+### Commands to run
+# terraform init 
+# terraform plan 
+# terraform apply
+```
+* Refer 4 to download terraform. Unzip terraform and and copy terraform.exe file to folder where you want to run the terraform commands 
+
+* terraform init creates .terraform.lock.hcl lock file, and it records the provider selections made
+
+* terraform apply creates a terraform.tfstate file 
+
+* State files : Terraform state files contain each and every detail of any resources along with their current status whether it is “ACTIVE”, “DELETED” or “PROVISIONING” etc.
+
+* IaC like Terraform saves us hours of clickops
+
+* OpenTofu is a good alternative for Terraform and will be getting more popular in the coming years
+
+* Errors faced: 
+    * googleapi: Error 403: The billing account for the owning project is disabled in state absent, accountDisabled
+
+### Doubts
+1. What is the difference bw principal and role with an example?
+2. Which is better - terraform or directly using GCP API to programmatically create resources on GCP?
+3. What is difference bw project and folder in GCP, and why need for 2 separate concepts?
+
+### References
+1. https://cloud.google.com/iam/docs/overview
+2. https://cloud.google.com/iam/docs/roles-overview
+3. https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/storage_bucket.html
+4. https://www.youtube.com/watch?v=dA6WqakJOts
+5. https://developer.hashicorp.com/terraform/install
+6. https://www.reddit.com/r/Terraform/comments/17xcpvq/can_someone_help_me_explain_when_is_terraform/
+7. https://www.reddit.com/r/googlecloud/comments/1e7umtt/terraform_vs_api/
+8. https://www.reddit.com/r/devops/comments/cb7rr8/gcp_api_vs_terraform/
+9. https://eitca.org/cloud-computing/eitc-cl-gcp-google-cloud-platform/introductions/the-essentials-of-gcp/examination-review-the-essentials-of-gcp/what-is-the-role-of-a-gcp-project-and-what-resources-can-you-provision-within-it/
+10. https://cloud.google.com/resource-manager/docs/cloud-platform-resource-hierarchy
