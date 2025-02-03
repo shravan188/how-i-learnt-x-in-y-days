@@ -1389,7 +1389,7 @@ pluginDefaults:
 * Ran the new flow below. Some changes in the scheduled flow include
     * Addition of trigger field
     * No longer having year or month as input as that can be obtained from trigger
-
+    * Concurrency is set 1 to avoid multiple flows working on the same table at the same time (alternatively can create staging table for each month)
 ```
 
 id: 02_postgres_taxi_scheduled
@@ -1680,3 +1680,339 @@ triggers:
 ### References
 1. https://www.reddit.com/r/PostgreSQL/comments/1ckzc8f/uuid_versus_sequence_why_is_a_uuid_bad_for/
 2. https://cloud.google.com/scheduler/docs/configuring/cron-job-schedules
+
+
+
+## Day 10
+### Duration : 0.75 hours
+
+### Learnings
+* Google Cloud Storage : Cloud storage is an object storage. Think of it like a directory on your local computer. However, this file system is in the cloud, so it’s infinitely scalable and can be accessed anywhere. GCS can be used as a data lake but it is not a data warehouse. GCS does not care what you put in it, you do not need to specify the data types or anything when loading data into GCS. A data warehouse does require specified data types and fields on write. Generally, we store raw data in GCS, then apply processing to load it into a data warehouse.
+
+* A data lake is just a glorified file system
+
+* Staging table : A temporary location where data from source systems is copied, so that we can process data (eg. add a new column, delete rows) before we load into the actual table. We need the staging table, because we need some place to store the data before we can load into the final table. In a tool like Pandas or Alteryx, we do not need a staging table as the data is already stored in the memory for these tools, and we can just focus on applying transformations
+
+* Key Value store in Kestra is similar to enviroment (.env) files. For example, to create a set of key value pairs to store credentials and configuration info for GCP, we can create a YAML file as shown below (to see steps to create service account and generate a key refer Day 7)
+
+```
+# gcp_kv.yml
+id: 04_gcp_kv
+namespace: zoomcamp
+
+tasks:
+  - id: gcp_creds
+    type: io.kestra.plugin.core.kv.Set
+    key: GCP_CREDS
+    kvType: JSON
+    value: |
+      {
+        "type": "service_account",
+        "project_id": "...",
+      }
+
+  - id: gcp_project_id
+    type: io.kestra.plugin.core.kv.Set
+    key: GCP_PROJECT_ID
+    kvType: STRING
+    value: kestra-sandbox # TODO replace with your project id
+
+  - id: gcp_location
+    type: io.kestra.plugin.core.kv.Set
+    key: GCP_LOCATION
+    kvType: STRING
+    value: europe-west2
+
+  - id: gcp_bucket_name
+    type: io.kestra.plugin.core.kv.Set
+    key: GCP_BUCKET_NAME
+    kvType: STRING
+    value: your-name-kestra # TODO make sure it's globally unique!
+
+  - id: gcp_dataset
+    type: io.kestra.plugin.core.kv.Set
+    key: GCP_DATASET
+    kvType: STRING
+    value: zoomcamp
+
+```
+
+* For detailed description on Pros and Cons of Alteryx refer 3
+
+### Doubts
+1. Can cloud storage be considered a data lake?
+2. What do you think about the comparison: A data lake is to a file system is what a data warehouse is to a relational database?
+3. Why does a tool like ALteryx not require a staging table?
+4. What is ACID compliance and how do we ensure it? (refer 3)
+5. Can we set a cost limit in Google Cloud i.e. cap resource or API consumption based on cost?
+6. What is the difference bw using Terraform vs using Kestra to create GCP resources like GCS bucket?
+
+### References
+1. https://www.reddit.com/r/dataengineering/comments/txwnlu/what_is_s3_do_you_put_a_data_lake_or_cloud_data/?rdt=56603
+2. https://www.reddit.com/r/dataengineering/comments/t4kz8u/wtf_is_a_datalake/
+3. https://www.reddit.com/r/dataengineering/comments/14qi60z/anybody_use_alteryx/
+4. https://stackoverflow.com/questions/27616776/how-do-i-set-a-cost-limit-in-google-developers-console
+5. https://cloud.google.com/billing/docs/how-to/budgets
+6. https://www.reddit.com/r/dataengineering/comments/ygieh8/data_engineering_projects_with_template_airflow/
+7. https://www.youtube.com/watch?v=KiTg8RPpGG4
+
+## Day 11
+### Duration : 3 hour 
+### Learnings
+* Airflow is an orchestration tool
+
+* Task : Any action that has to be performed. It is basic unit of execution in Airflow, and of 3 types
+  * Operator :  A template for a predefined task (eg. PythonOperator for running python function, BashOperator for executing bash command)
+  * Sensor: Type of opearator which waits for something to occur and allows worflow to poceed o
+  * Taskflow
+
+* Directed Acyclic Graph : Collection of tasks and relationships between those tasks (i.e. order in which tasks will be run)
+
+* DAG Run : An object. It is created any time a DAG is executed, and all tasks inside the DAG Run are then executed. We can have multiple DAG Runs for the same DAG at the same time (all run independently) (eg. For daily frequency, there is a new DAG run object created for each day)
+
+* DAG Run Status : The status  assigned to the DAG Run when all of the tasks are in the one of the terminal states (i.e. success, failed, skipped). The two poosible value are 
+  * success if all of the leaf nodes states are either success or skipped
+  * failed if any of the leaf nodes state is either failed or upstream_failed
+
+* Catchup : Scheduler by default kicks off a DAG Run for any data interval that has not been run since last data interval. For example if 
+  1. a start date is datetime(2025,1,1) and today is 2025-01-21, then all non-triggered DAG Runs between start date and current date are triggered. 
+  2. Consider that workflow is suppose to run hourly, but it missed the previous 3 runs. Then the scheduler will invoke the 3 runs which were missed previously
+  To avoid this we can set `catchup=False`. When catchup is turned off, the scheduler creates a DAG run only for the latest interval.
+
+* When we have historical data to be ingested, catchup is useful
+
+* Scheduler :  Monitors all tasks and DAGs, then triggers the task instances once their dependencies are complete
+
+* Executor : Handle running of tasks (include sequential executor, local, dask executor, celery, kubernetes executor)
+
+* Bit shift operator (>>) : If we want to execute 2 tasks in a sequence, one after another, we use >> 
+
+* Xcom : Allows tasks to communicate with each other i.e. share data between tasks (by default Tasks are entirely isolated).  Airflow works like this: It will execute Task1, then populate xcom and then execute the next task.
+
+* A Jinja template is simply a text file. It is very similar to a static file like HTML, XML with the only difference that you can add variables and expressions. These variables and expression get replaced with the variable value when the template is rendered i.e. converted to the static HTML or XML file 
+```
+## template file
+<li><a href="{{ item.href }}">{{ item.caption }}</a></li>
+
+## final html file generated on rendering
+<li><a href="www.amazon.in/toys">Toys</a></li>
+
+```
+
+* Dynamic DAG: Suppose we have a different file for each country (or even each month), but all have the same format. Instead of creating a new DAG for each file, we can create a single DAG and then use dynamic DAG to generate multiple similar DAGs from the base DAG, one for each input file, using variables. We use DAG Factory to generate that
+
+* Name of the DAG will be what you give in the DAG context manager - in the example below mydag
+
+* Error encountered
+  *  Airflow already exist in the db. Exited with code 0 - What you see as exiting is the "init" process (which is absolutely expected). The fact that it exited with 0 exit code is a good sign actually (which means that the init process did it job and completed successfully) (refer 7)
+  * Broken DAG: [/opt/airflow/dags/exampledag.py] - TypeError: 'type' object is not subscriptable (refer 14)
+  * ERROR - Failed to execute job 15 for task print_astronauts (xcom_pull() got an unexpected keyword argument 'taks_ids'; 280)
+  * ERROR - Failed to execute job 26 for task print_astronauts (list indices must be integers or slices, not str; 618) - Because output was list within list, hence had to do person_in_space[0] to get inner list
+
+```
+## simple_dag.py
+import requests
+
+from datetime import datetime
+from airflow import Dataset
+from airflow import DAG
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.decorators import task, dag
+
+def get_astronauts():
+    number_of_people_in_space = 3
+    list_of_people_in_space = [
+        {"craft": "ISS", "name": "Oleg Kononenko"},
+        {"craft": "ISS", "name": "Nikolai Chub"},
+        {"craft": "ISS", "name": "Tracy Caldwell Dyson"}
+    ]
+
+
+    return list_of_people_in_space # return value is populated in xcom
+
+def print_astronauts(ti):
+    person_in_space = ti.xcom_pull(task_ids=["get_astronauts"])
+    # Output : [[{'craft': 'ISS', 'name': 'Oleg Kononenko'}, {'craft': 'ISS', 'name': 'Nikolai Chub'}, {'craft': 'ISS', 'name': 'Tracy Caldwell Dyson'}]]
+    person_in_space = person_in_space[0]
+    for person in person_in_space:
+        craft = person["craft"]
+        name = person["name"]
+        print(f"{name} is currently in space flying on the {craft}")
+
+with DAG(
+  "mydag",
+  start_date=datetime(2024,1,1),
+  schedule="@daily",
+  catchup=False
+) as dag:
+    get_astronaut_data = PythonOperator(
+        task_id="get_astronauts",
+        python_callable=get_astronauts
+        )
+    print_astronaut_data = PythonOperator(
+        task_id="print_astronauts",
+        python_callable=print_astronauts
+        )
+    
+    get_astronaut_data >> print_astronaut_data
+
+```
+
+### Doubts
+1. What exactly is the constraints file in Airflow and how do we use it?
+2. When are xcoms useful in Airflow?
+3. What is the project folder structure in airflow - what do folders like dags, logs, plugins do?
+4. What is advantage of using pendulum over datetime library in Python?
+5. Why use catchup in Airflow dag?
+6. When to use catchup vs macros vs dynamic dags in Airflow?
+7. What is the use of task decorator in airflow?
+8. How is data passed from 1 task to next task in a daag?
+9. How does Docker volume map to host file location? How is it that any change we make in host system is immediately reflected in Docker?
+10. Is bit shift operator must to setup order in which tasks are executed i.e. specify task dependency?
+11. What is Astronomer Airflow?
+
+### References
+1. https://www.youtube.com/watch?v=Fl64Y0p7rls (Airflow setup using DOcker)
+2. https://www.reddit.com/r/dataengineering/comments/18ad1du/airflow_python_task_vs_custom_hooksoperators/
+3. https://jinja.palletsprojects.com/en/stable/templates/
+4. https://aws.amazon.com/blogs/big-data/dynamic-dag-generation-with-yaml-and-dag-factory-in-amazon-mwaa
+5. https://stackoverflow.com/questions/46059161/airflow-how-to-pass-xcom-variable-into-python-function
+6. https://medium.com/@chanon.krittapholchai/apache-airflow-dynamic-dag-with-jinja-ffc1c90910bf
+7. https://stackoverflow.com/questions/68714224/airflow-exiting-after-initilalization
+8. https://stackoverflow.com/questions/76538956/airflow-backfill-and-catchup-how-is-it-useful
+9. https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dag-run.html
+10. https://www.youtube.com/watch?v=IH1-0hwFZRQ (Data With Marc)
+11. https://robust-dinosaur-2ef.notion.site/Your-First-DAG-in-5-minutes-5d15bb2c51b044ea9b8266b2ac07c1fe
+12. https://github.com/krishnaik06/ETLWeather/blob/main/dags/exampledag.py
+13. https://stackoverflow.com/questions/50149085/python-airflow-return-result-from-pythonoperator
+14. https://stackoverflow.com/questions/75202610/typeerror-type-object-is-not-subscriptable-python
+
+## Day 12
+
+### Duration : 1.5 hours
+
+### Learnings
+
+* OLTP (Transactional) vs OLAP (Analytical) : OLTP is optimized for transactional processing and OLAP for data analysis and reporting. For example, a Postgres database which stores ATM transactions or ecommerce purchases or text messages is an OLTP database, whereas when multiple OLTP databases are joined together for reporting purpose, and stored into another postgres database, that database in an OLAP database
+
+* Some key differences in OLTP vs OLAP:
+  * Historical data
+  * Different end users (external customers vs internal analysts)
+  * Types of operations on database (INSERT, UPDATE, DELETE vs SELECT)
+  * Normalization (Normalized vs Denormalized)
+
+* Data Warehouse :  A data warehouse is a centralized system that aggregates data from multiple sources into a single, central and consistent data store (basically for OLAP)
+
+* Data mart :  Subset of the data in the data warehouse that focuses on a specific business line, department, subject area, or team.
+
+* ETL is the bridge bw OLTP and OLAP. Overall flow is : Operational systems > Staging area > Data warehouse > Data marts (and in between each stage there are multiple transformations)
+
+* EXTERNAL TABLE : A link to data residing in a table outside big query. Once created, external datasets contain tables from a referenced external data source. Data from these tables aren't copied into BigQuery, but queried every time they are used. (say for example a csv file in google storage or a postgres db)
+
+```
+
+CREATE OR REPLACE EXTERNAL TABLE 'taxi-rides-ny.mytaxi.external_yellow_tripdata'
+OPTIONS(
+  format='CSV',
+  uris = ['gs://nyc-tl-data/trip data/yellow_tripdata_2019-*.csv']
+)
+
+
+```
+* Since data is not within BigQuery, it cannot determine no. of rows or size of data
+
+* Partitioning : Dividing a table into segments. Major reason to use partition is it makes searching/filtering easier as it has to scan only subset of data (i.e. partition) based on the filter clause rather than scan the entire data
+
+* Clustering : Clustering sorts the table based on user-defined columns
+
+* Clustering is helpful because when rows are sorted, query engine can do data skipping more efficiently and hence has to scan lesser data (linear search vs binary search OR if it has to search one value, as soon as it reaches the last occurence of that value, it can stop there and not scan till the end). It also can get min-max statistics easily. Disdvantage is cost estimate cannot be computed upfront, unlike partitioning
+
+
+* Partitioning can be done only on 1 column, clustering upto 4 columns as shown below
+
+```
+-- not external, as we cannot partition external table
+CREATE OR REPLACE TABLE 'taxi-rides-ny.mytaxi.yellow_tripdata_partitioned'
+PARTITION BY
+DATE(tpep_pickup_datetime) AS
+SELECT * FROM taxi-rides-ny.nytaxi.external_yellow_tripdata;
+
+-- Scanning 1.6GB of data
+SELECT DISTINCT(VendorID)
+FROM taxi-rides-ny.nytaxi.yellow_tripdata_non_partitoned
+WHERE DATE(tpep_pickup_datetime) BETWEEN '2019-06-01' AND '2019-06-30';
+
+-- Scanning ~106 MB of DATA
+SELECT DISTINCT(VendorID)
+FROM taxi-rides-ny.nytaxi.yellow_tripdata_partitioned
+WHERE DATE(tpep_pickup_datetime) BETWEEN '2019-06-01' AND '2019-06-30';
+```
+
+* To see amount of data in each partition use `INFORMATION_SCHEMA.PARITIONS` as shown below
+```
+select table_name, partition_id, total_rows
+FROM 'nytaxi.INFORMATION_SCHEMA.PARTITIONS'
+WHERE table_name = 'taxi-rides-ny.nytaxi.yellow_tripdata_partitioned'
+ORDER BY total_rows DESC
+
+```
+* Clustering + Partitioning : Very powerful technique, as partitioning reduces amount of data engine has to scan, and by sorting data within each partition, it can scan data more efficiently/ better data skipping, hence further improving performance. This can be done as follows (once data size expands beyond 1gb, then we can see benefits not before)
+
+
+```
+
+-- Creating a partition and cluster table
+CREATE OR REPLACE TABLE taxi-rides-ny.nytaxi.yellow_tripdata_partitioned_clustered
+PARTITION BY DATE(tpep_pickup_datetime)
+CLUSTER BY VendorID AS
+SELECT * FROM taxi-rides-ny.nytaxi.external_yellow_tripdata;
+
+-- Query scans 1.1 GB
+SELECT count(*) as trips
+FROM taxi-rides-ny.nytaxi.yellow_tripdata_partitoned
+WHERE DATE(tpep_pickup_datetime) BETWEEN '2019-06-01' AND '2020-12-31'
+  AND VendorID=1;
+
+-- Query scans 864.5 MB
+SELECT count(*) as trips
+FROM taxi-rides-ny.nytaxi.yellow_tripdata_partitoned_clustered
+WHERE DATE(tpep_pickup_datetime) BETWEEN '2019-06-01' AND '2020-12-31'
+  AND VendorID=1;
+
+```
+* Clustering helps queries that have filters on clustering columns. If you have such a query, compare cost of a query shown after query execution with and without such filter. The ratio is how much clustering saves you.
+
+* Block Pruning : BigQuery sorts the data in a clustered table based on the values in the clustering columns and organizes them into blocks
+
+* When we use clustering over partitioning:
+  * When cardinality of column is high, because partitioning will create too many partitions
+  * When partioning leads to small size per partition (less than 1 GB)
+
+
+* Automatic Reclustering : When there is any insert, update or delete in clustered table, Big Query automatically reculsters data
+
+* For loading data from Postgres db into BigQuery database, Airflow is one of the best options, as options with BigQuery to do the same are limited (refer 4)
+
+
+* Sharding : Sharding and partitioning are both about breaking up a large data set into smaller subsets. The difference is that sharding implies the data is spread across multiple computers while partitioning does not.
+
+### Doubts
+1. In what way is OLTP optimized for transactional processing?
+2. What is external table in bigquery?
+3. WHen to use temporary table?
+4. How to load data from a postgres database into Bigquery table?
+5. Why does clustering (in other words sorting) columns improve query performance?
+6. What is block pruning?
+7. Why cant we
+
+### References
+1. https://www.stitchdata.com/resources/oltp-vs-olap/
+2. https://en.wikipedia.org/wiki/Data_mart
+3. https://cloud.google.com/bigquery/docs/datasets-intro#external_datasets
+4. https://stackoverflow.com/questions/66901681/streaming-postgresql-tables-into-google-bigquery
+5. https://docs.rivery.io/docs/partitioning-and-clustering-in-bigquery
+6. https://e6data.com/enhancing-query-performance-apache-iceberg-sorting-within-partitions
+7. https://www.reddit.com/r/bigquery/comments/xc2z7z/how_do_i_know_if_clustering_of_a_particular
+8. https://cloud.google.com/bigquery/docs/clustered-tables
+9. https://www.youtube.com/watch?v=-CqXf7vhhDs&list=PL3MmuxUbc_hJed7dXYoJw8DoCuVHhGEQb
+10. https://hoffa.medium.com/bigquery-optimized-cluster-your-tables-65e2f684594b
