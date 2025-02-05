@@ -447,12 +447,19 @@ resource "google_storage_bucket" "demo-bucket" {
 ### Doubts
 1. What does declarative syntax mean? And how is it different from imperative?
 2. How exactly is terraform cloud agnostic and be used to automate multi cloud deployment? How does it map say cloud storage in GCP to S3 in AWS? 
+3. What is the folder structure for terraform?
 
 ### References
 1. https://spacelift.io/blog/terraform-tutorial
 2. https://dzone.com/articles/an-introduction-to-terraforms-core-concepts
 3. https://www.reddit.com/r/Terraform/comments/17xcpvq/can_someone_help_me_explain_when_is_terraform/
 
+Folder structure - main.tf (https://spacelift.io/blog/terraform-files)
+
+Note: You didn't use the -out option to save this plan, so Terraform can't guarantee to take exactly these actions if you run "terraform apply" now.
+
+Error because billing account not linked - The billing account for the owning project is disabled in state absent,
+curl
 
 ## Day 4 and 5
 ### Duration : 1 + 1 hour
@@ -2016,3 +2023,183 @@ WHERE DATE(tpep_pickup_datetime) BETWEEN '2019-06-01' AND '2020-12-31'
 8. https://cloud.google.com/bigquery/docs/clustered-tables
 9. https://www.youtube.com/watch?v=-CqXf7vhhDs&list=PL3MmuxUbc_hJed7dXYoJw8DoCuVHhGEQb
 10. https://hoffa.medium.com/bigquery-optimized-cluster-your-tables-65e2f684594b
+
+## Day 13
+### Duration : 3.5 hours
+
+### Learnings
+* Created GCS bukcet and Big Query dataset using Terraform
+
+```
+## main.tf
+
+terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "5.6.0"
+    }
+  }
+}
+
+provider "google" {
+  credentials = "./my-creds.json"
+  project     = "terraform-demo-448805"
+  region      = "us-central1"
+}
+
+# demo-bucket need not be globally unique, but name must be globally unique
+resource "google_storage_bucket" "demo-bucket" {
+  name          = "terraform-demo-448805-terra-bucket"
+  location      = "US"
+  force_destroy = true
+
+  lifecycle_rule {
+    condition {
+      age = 3
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  lifecycle_rule {
+    condition {
+      age = 1
+    }
+    action {
+      type = "AbortIncompleteMultipartUpload"
+    }
+  }
+}
+
+resource "google_bigquery_dataset" "dataset" {
+  dataset_id                  = "trips_data_all"
+  friendly_name               = "trips_data_all"
+  description                 = "This dataset contains trip data"
+  location                    = "US"
+  default_table_expiration_ms = 3600000
+}
+
+
+### To run the terraform script - terraform plan > terraform apply
+```
+
+* Create DAG in Airflow to download zip file from Github, unzip it to csv, convert it from csv to Parquet
+
+```
+import os
+import logging
+
+from airflow import DAG
+from airflow.utils.dates import days_ago
+from airflow.operators.bash import BashOperator
+from airflow.operators.python import PythonOperator
+
+from google.cloud import storage
+from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateExternalTableOperator
+import pyarrow.csv as pv
+import pyarrow.parquet as pq
+
+#PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+#BUCKET = os.environ.get("GCP_GCS_BUCKET")
+PROJECT_ID = "terraform-demo-448805"
+BUCKET = "terraform-demo-448805-terra-bucket"
+
+
+dataset_file = "yellow_tripdata_2021-01.csv"
+dataset_url = f"https://s3.amazonaws.com/nyc-tlc/trip+data/{dataset_file}"
+path_to_local_home = os.environ.get("AIRFLOW_HOME", "/opt/airflow/")
+parquet_file = dataset_file.replace('.csv', '.parquet')
+#BIGQUERY_DATASET = os.environ.get("BIGQUERY_DATASET", 'trips_data_all')
+BIGQUERY_DATASET = 'trips_data_all'
+
+def format_to_parquet(src_file):
+    if not src_file.endswith('.csv'):
+        logging.error("Can only accept source files in CSV format, for the moment")
+        return
+    table = pv.read_csv(src_file)
+    pq.write_table(table, src_file.replace('.csv', '.parquet'))
+
+def get_current_dir():
+    print(os.getcwd())
+
+default_args = {
+    "owner": "airflow",
+    "start_date": days_ago(1),
+    "depends_on_past": False,
+    "retries": 1,
+}
+
+# DAG declaration - using a Context Manager (an implicit way)
+with DAG(
+    dag_id="data_ingestion_gcs_dag",
+    schedule_interval="@daily",
+    default_args=default_args,
+    catchup=False,
+    max_active_runs=1,
+    tags=['dtc-de'],
+) as dag:
+
+    download_dataset_task = BashOperator(
+        task_id="download_dataset_task",
+        bash_command=f"curl -sSL https://github.com/DataTalksClub/nyc-tlc-data/releases/download/yellow/yellow_tripdata_2021-01.csv.gz | gunzip > {path_to_local_home}/yellow_tripdata_2021-01.csv"
+    )
+
+    format_to_parquet_task = PythonOperator(
+        task_id="format_to_parquet_task",
+        python_callable=format_to_parquet,
+        op_kwargs={
+            "src_file": f"{path_to_local_home}/{dataset_file}",
+        },
+    )
+
+    download_dataset_task >> format_to_parquet_task 
+
+```
+
+
+* To kill Airflow task from UI steps are : DAGs > Select DAG > Graph > Select task > Mark as Failed (refer 10)
+
+* Challenges faced which took time to solve
+  * Finding the right bash command. Wget command was not working as not installed. Then took lot of time to find the right curl command to download file from Github and unzip it as csv. Was finally able to figure it (refer 9)
+  * Finding where the BashOperator stores the output csv file. Tried searching many articles, some said in /tmp folder, but was not able to find it there. Finally changed the storage path to AIRFLOW_HOME/file_name
+  * Finding out which Airflow container has the output file. Airflow has the following services - Scheduler, Triggerer, Worker, Web Server, Redis, Postgres. To find out ran `docker exec -it <container_id> sh` for all the services/containers. Finally found out that Worker container has the csv file and not the other containers
+  * Trying to connect Airflow to GCP to create a GCS bucket. Tried using Admin > Connection > Add Connection but was not successful
+
+* To find out file contents of each Airflow service
+
+```
+docker ps
+
+docker exec -it bffc64fabd8c sh
+
+ls
+
+```
+
+
+* To execute a bash script, place it in a location relative to the directory containing the DAG file. So if your DAG file is in /usr/local/airflow/dags/test_dag.py, you can move your test.sh file to any location under /usr/local/airflow/dags/ (Example: /usr/local/airflow/dags/scripts/test.sh) and pass the relative path to bash_command (bash_command="scripts/test.sh")
+
+* Most operators define tasks to be executed in AIRFLOW_HOME, save a few such as PythonVirtualenvOperator and BashOperator that execute inside a temporary folder. For your task (GCSToLocalFilesystemOperator) it's easily the AIRFLOW_HOME.
+
+### Doubts
+1. What are bind mounts?
+2. Do all docker services use the same set of folders to store data? Or only the volumes shared across all services, and others or not? Why is the output file only stored in worker container, not in others?
+3. Is there anyway I can set the working directory in airflow where my codes will run?
+
+### References
+1. https://stackoverflow.com/questions/71897448/why-is-airflow-not-recognizing-my-bash-command
+2. https://medium.com/@pyramidofmerlin/how-to-maker-airflow-be-able-to-manage-files-in-your-local-computer-371ded7d0804
+3. https://stackoverflow.com/questions/61344852/how-to-change-airflows-tmp-data-directory
+4. https://airflow.apache.org/docs/apache-airflow/stable/howto/operator/bash.html
+5. https://stackoverflow.com/questions/58132463/how-to-change-airflow-home-from-docker-to-local-system
+6. https://stackoverflow.com/questions/64866966/cannot-find-local-files-placed-in-airflow-gcstolocalfilesystemoperator
+7. https://stackoverflow.com/questions/55292629/is-there-anyway-i-can-set-the-working-directory-in-airflow-where-my-codes-will-r
+8. https://stackoverflow.com/questions/53960327/save-result-of-operator-in-apache-airflow
+9. https://superuser.com/questions/1235085/how-to-use-gzip-or-gunzip-in-a-pipeline-with-curl-for-binary-gz-files
+10. https://stackoverflow.com/questions/43631693/how-to-stop-kill-airflow-tasks-from-the-ui
+
+### TO DOS
+1. Create a Dataproc cluster from Airflow - GCP (https://www.youtube.com/watch?v=LkGFyi8S4Ys)
+2. Create a Pub Sub with Cloud Function to limit Bills on Google (https://stackoverflow.com/a/65611211)
