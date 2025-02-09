@@ -1894,137 +1894,8 @@ with DAG(
 13. https://stackoverflow.com/questions/50149085/python-airflow-return-result-from-pythonoperator
 14. https://stackoverflow.com/questions/75202610/typeerror-type-object-is-not-subscriptable-python
 
+
 ## Day 12
-
-### Duration : 1.5 hours
-
-### Learnings
-
-* OLTP (Transactional) vs OLAP (Analytical) : OLTP is optimized for transactional processing and OLAP for data analysis and reporting. For example, a Postgres database which stores ATM transactions or ecommerce purchases or text messages is an OLTP database, whereas when multiple OLTP databases are joined together for reporting purpose, and stored into another postgres database, that database in an OLAP database
-
-* Some key differences in OLTP vs OLAP:
-  * Historical data
-  * Different end users (external customers vs internal analysts)
-  * Types of operations on database (INSERT, UPDATE, DELETE vs SELECT)
-  * Normalization (Normalized vs Denormalized)
-
-* Data Warehouse :  A data warehouse is a centralized system that aggregates data from multiple sources into a single, central and consistent data store (basically for OLAP)
-
-* Data mart :  Subset of the data in the data warehouse that focuses on a specific business line, department, subject area, or team.
-
-* ETL is the bridge bw OLTP and OLAP. Overall flow is : Operational systems > Staging area > Data warehouse > Data marts (and in between each stage there are multiple transformations)
-
-* EXTERNAL TABLE : A link to data residing in a table outside big query. Once created, external datasets contain tables from a referenced external data source. Data from these tables aren't copied into BigQuery, but queried every time they are used. (say for example a csv file in google storage or a postgres db)
-
-```
-
-CREATE OR REPLACE EXTERNAL TABLE 'taxi-rides-ny.mytaxi.external_yellow_tripdata'
-OPTIONS(
-  format='CSV',
-  uris = ['gs://nyc-tl-data/trip data/yellow_tripdata_2019-*.csv']
-)
-
-
-```
-* Since data is not within BigQuery, it cannot determine no. of rows or size of data
-
-* Partitioning : Dividing a table into segments. Major reason to use partition is it makes searching/filtering easier as it has to scan only subset of data (i.e. partition) based on the filter clause rather than scan the entire data
-
-* Clustering : Clustering sorts the table based on user-defined columns
-
-* Clustering is helpful because when rows are sorted, query engine can do data skipping more efficiently and hence has to scan lesser data (linear search vs binary search OR if it has to search one value, as soon as it reaches the last occurence of that value, it can stop there and not scan till the end). It also can get min-max statistics easily. Disdvantage is cost estimate cannot be computed upfront, unlike partitioning
-
-
-* Partitioning can be done only on 1 column, clustering upto 4 columns as shown below
-
-```
--- not external, as we cannot partition external table
-CREATE OR REPLACE TABLE 'taxi-rides-ny.mytaxi.yellow_tripdata_partitioned'
-PARTITION BY
-DATE(tpep_pickup_datetime) AS
-SELECT * FROM taxi-rides-ny.nytaxi.external_yellow_tripdata;
-
--- Scanning 1.6GB of data
-SELECT DISTINCT(VendorID)
-FROM taxi-rides-ny.nytaxi.yellow_tripdata_non_partitoned
-WHERE DATE(tpep_pickup_datetime) BETWEEN '2019-06-01' AND '2019-06-30';
-
--- Scanning ~106 MB of DATA
-SELECT DISTINCT(VendorID)
-FROM taxi-rides-ny.nytaxi.yellow_tripdata_partitioned
-WHERE DATE(tpep_pickup_datetime) BETWEEN '2019-06-01' AND '2019-06-30';
-```
-
-* To see amount of data in each partition use `INFORMATION_SCHEMA.PARITIONS` as shown below
-```
-select table_name, partition_id, total_rows
-FROM 'nytaxi.INFORMATION_SCHEMA.PARTITIONS'
-WHERE table_name = 'taxi-rides-ny.nytaxi.yellow_tripdata_partitioned'
-ORDER BY total_rows DESC
-
-```
-* Clustering + Partitioning : Very powerful technique, as partitioning reduces amount of data engine has to scan, and by sorting data within each partition, it can scan data more efficiently/ better data skipping, hence further improving performance. This can be done as follows (once data size expands beyond 1gb, then we can see benefits not before)
-
-
-```
-
--- Creating a partition and cluster table
-CREATE OR REPLACE TABLE taxi-rides-ny.nytaxi.yellow_tripdata_partitioned_clustered
-PARTITION BY DATE(tpep_pickup_datetime)
-CLUSTER BY VendorID AS
-SELECT * FROM taxi-rides-ny.nytaxi.external_yellow_tripdata;
-
--- Query scans 1.1 GB
-SELECT count(*) as trips
-FROM taxi-rides-ny.nytaxi.yellow_tripdata_partitoned
-WHERE DATE(tpep_pickup_datetime) BETWEEN '2019-06-01' AND '2020-12-31'
-  AND VendorID=1;
-
--- Query scans 864.5 MB
-SELECT count(*) as trips
-FROM taxi-rides-ny.nytaxi.yellow_tripdata_partitoned_clustered
-WHERE DATE(tpep_pickup_datetime) BETWEEN '2019-06-01' AND '2020-12-31'
-  AND VendorID=1;
-
-```
-* Clustering helps queries that have filters on clustering columns. If you have such a query, compare cost of a query shown after query execution with and without such filter. The ratio is how much clustering saves you.
-
-* Block Pruning : BigQuery sorts the data in a clustered table based on the values in the clustering columns and organizes them into blocks
-
-* When we use clustering over partitioning:
-  * When cardinality of column is high, because partitioning will create too many partitions
-  * When partioning leads to small size per partition (less than 1 GB)
-
-
-* Automatic Reclustering : When there is any insert, update or delete in clustered table, Big Query automatically reculsters data
-
-* For loading data from Postgres db into BigQuery database, Airflow is one of the best options, as options with BigQuery to do the same are limited (refer 4)
-
-
-* Sharding : Sharding and partitioning are both about breaking up a large data set into smaller subsets. The difference is that sharding implies the data is spread across multiple computers while partitioning does not.
-
-### Doubts
-1. In what way is OLTP optimized for transactional processing?
-2. What is external table in bigquery?
-3. WHen to use temporary table?
-4. How to load data from a postgres database into Bigquery table?
-5. Why does clustering (in other words sorting) columns improve query performance?
-6. What is block pruning?
-7. Why cant we
-
-### References
-1. https://www.stitchdata.com/resources/oltp-vs-olap/
-2. https://en.wikipedia.org/wiki/Data_mart
-3. https://cloud.google.com/bigquery/docs/datasets-intro#external_datasets
-4. https://stackoverflow.com/questions/66901681/streaming-postgresql-tables-into-google-bigquery
-5. https://docs.rivery.io/docs/partitioning-and-clustering-in-bigquery
-6. https://e6data.com/enhancing-query-performance-apache-iceberg-sorting-within-partitions
-7. https://www.reddit.com/r/bigquery/comments/xc2z7z/how_do_i_know_if_clustering_of_a_particular
-8. https://cloud.google.com/bigquery/docs/clustered-tables
-9. https://www.youtube.com/watch?v=-CqXf7vhhDs&list=PL3MmuxUbc_hJed7dXYoJw8DoCuVHhGEQb
-10. https://hoffa.medium.com/bigquery-optimized-cluster-your-tables-65e2f684594b
-
-## Day 13
 ### Duration : 3.5 hours
 
 ### Learnings
@@ -2200,6 +2071,399 @@ ls
 9. https://superuser.com/questions/1235085/how-to-use-gzip-or-gunzip-in-a-pipeline-with-curl-for-binary-gz-files
 10. https://stackoverflow.com/questions/43631693/how-to-stop-kill-airflow-tasks-from-the-ui
 
+
+## Day 13
+
+### Duration : 1.5 hours
+
+### Learnings
+
+* OLTP (Transactional) vs OLAP (Analytical) : OLTP is optimized for transactional processing and OLAP for data analysis and reporting. For example, a Postgres database which stores ATM transactions or ecommerce purchases or text messages is an OLTP database, whereas when multiple OLTP databases are joined together for reporting purpose, and stored into another postgres database, that database in an OLAP database
+
+* Some key differences in OLTP vs OLAP:
+  * Historical data
+  * Different end users (external customers vs internal analysts)
+  * Types of operations on database (INSERT, UPDATE, DELETE vs SELECT)
+  * Normalization (Normalized vs Denormalized)
+
+* Data Warehouse :  A data warehouse is a centralized system that aggregates data from multiple sources into a single, central and consistent data store (basically for OLAP)
+
+* Data mart :  Subset of the data in the data warehouse that focuses on a specific business line, department, subject area, or team.
+
+* ETL is the bridge bw OLTP and OLAP. Overall flow is : Operational systems > Staging area > Data warehouse > Data marts (and in between each stage there are multiple transformations)
+
+* EXTERNAL TABLE : A link to data residing in a table outside big query. Once created, external datasets contain tables from a referenced external data source. Data from these tables aren't copied into BigQuery, but queried every time they are used. (say for example a csv file in google storage or a postgres db)
+
+```
+
+CREATE OR REPLACE EXTERNAL TABLE 'taxi-rides-ny.mytaxi.external_yellow_tripdata'
+OPTIONS(
+  format='CSV',
+  uris = ['gs://nyc-tl-data/trip data/yellow_tripdata_2019-*.csv']
+)
+
+
+```
+* Since data is not within BigQuery, it cannot determine no. of rows or size of data
+
+* Partitioning : Dividing a table into segments. Major reason to use partition is it makes searching/filtering easier as it has to scan only subset of data (i.e. partition) based on the filter clause rather than scan the entire data
+
+* Clustering : Clustering sorts the table based on user-defined columns
+
+* Clustering is helpful because when rows are sorted, query engine can do data skipping more efficiently and hence has to scan lesser data (linear search vs binary search OR if it has to search one value, as soon as it reaches the last occurence of that value, it can stop there and not scan till the end). It also can get min-max statistics easily. Disdvantage is cost estimate cannot be computed upfront, unlike partitioning
+
+
+* Partitioning can be done only on 1 column, clustering upto 4 columns as shown below
+
+```
+-- not external, as we cannot partition external table
+CREATE OR REPLACE TABLE 'taxi-rides-ny.mytaxi.yellow_tripdata_partitioned'
+PARTITION BY
+DATE(tpep_pickup_datetime) AS
+SELECT * FROM taxi-rides-ny.nytaxi.external_yellow_tripdata;
+
+-- Scanning 1.6GB of data
+SELECT DISTINCT(VendorID)
+FROM taxi-rides-ny.nytaxi.yellow_tripdata_non_partitoned
+WHERE DATE(tpep_pickup_datetime) BETWEEN '2019-06-01' AND '2019-06-30';
+
+-- Scanning ~106 MB of DATA
+SELECT DISTINCT(VendorID)
+FROM taxi-rides-ny.nytaxi.yellow_tripdata_partitioned
+WHERE DATE(tpep_pickup_datetime) BETWEEN '2019-06-01' AND '2019-06-30';
+```
+
+* To see amount of data in each partition use `INFORMATION_SCHEMA.PARITIONS` as shown below
+```
+select table_name, partition_id, total_rows
+FROM 'nytaxi.INFORMATION_SCHEMA.PARTITIONS'
+WHERE table_name = 'taxi-rides-ny.nytaxi.yellow_tripdata_partitioned'
+ORDER BY total_rows DESC
+
+```
+* Clustering + Partitioning : Very powerful technique, as partitioning reduces amount of data engine has to scan, and by sorting data within each partition, it can scan data more efficiently/ better data skipping, hence further improving performance. This can be done as follows (once data size expands beyond 1gb, then we can see benefits not before)
+
+
+```
+
+-- Creating a partition and cluster table
+CREATE OR REPLACE TABLE taxi-rides-ny.nytaxi.yellow_tripdata_partitioned_clustered
+PARTITION BY DATE(tpep_pickup_datetime)
+CLUSTER BY VendorID AS
+SELECT * FROM taxi-rides-ny.nytaxi.external_yellow_tripdata;
+
+-- Query scans 1.1 GB
+SELECT count(*) as trips
+FROM taxi-rides-ny.nytaxi.yellow_tripdata_partitoned
+WHERE DATE(tpep_pickup_datetime) BETWEEN '2019-06-01' AND '2020-12-31'
+  AND VendorID=1;
+
+-- Query scans 864.5 MB
+SELECT count(*) as trips
+FROM taxi-rides-ny.nytaxi.yellow_tripdata_partitoned_clustered
+WHERE DATE(tpep_pickup_datetime) BETWEEN '2019-06-01' AND '2020-12-31'
+  AND VendorID=1;
+
+```
+* Clustering helps queries that have filters on clustering columns. If you have such a query, compare cost of a query shown after query execution with and without such filter. The ratio is how much clustering saves you.
+
+* Block Pruning : BigQuery sorts the data in a clustered table based on the values in the clustering columns and organizes them into blocks
+
+* When we use clustering over partitioning:
+  * When cardinality of column is high, because partitioning will create too many partitions
+  * When partioning leads to small size per partition (less than 1 GB)
+
+
+* Automatic Reclustering : When there is any insert, update or delete in clustered table, Big Query automatically reculsters data
+
+* For loading data from Postgres db into BigQuery database, Airflow is one of the best options, as options with BigQuery to do the same are limited (refer 4)
+
+
+* Sharding : Sharding and partitioning are both about breaking up a large data set into smaller subsets. The difference is that sharding implies the data is spread across multiple computers while partitioning does not.
+
+### Doubts
+1. In what way is OLTP optimized for transactional processing?
+2. What is external table in bigquery?
+3. WHen to use temporary table?
+4. How to load data from a postgres database into Bigquery table?
+5. Why does clustering (in other words sorting) columns improve query performance?
+6. What is block pruning?
+7. Why cant we
+
+### References
+1. https://www.stitchdata.com/resources/oltp-vs-olap/
+2. https://en.wikipedia.org/wiki/Data_mart
+3. https://cloud.google.com/bigquery/docs/datasets-intro#external_datasets
+4. https://stackoverflow.com/questions/66901681/streaming-postgresql-tables-into-google-bigquery
+5. https://docs.rivery.io/docs/partitioning-and-clustering-in-bigquery
+6. https://e6data.com/enhancing-query-performance-apache-iceberg-sorting-within-partitions
+7. https://www.reddit.com/r/bigquery/comments/xc2z7z/how_do_i_know_if_clustering_of_a_particular
+8. https://cloud.google.com/bigquery/docs/clustered-tables
+9. https://www.youtube.com/watch?v=-CqXf7vhhDs&list=PL3MmuxUbc_hJed7dXYoJw8DoCuVHhGEQb
+10. https://hoffa.medium.com/bigquery-optimized-cluster-your-tables-65e2f684594b
+
+
+
+## Day 14 / W3-Homework
+### Duraion : 1.5 hours
+### Learnings
+
+* View : When you query a view, you are basically querying another query which is in the view's definition
+
+* Materialized view : A view does not exist as a stored set of data values in a database. The rows and columns of data come from tables referenced in the query defining the view and are produced dynamically when the view is referenced. A view acts as a filter on the underlying tables referenced in the view. If we want the view to actually store the data it references to, we create a materialized view. A materialized view  has it's own storage that basically acts as a cache for the data in the underlying tables.
+
+* BigQuery stores table data in columnar format
+
+* Row-oriented data store vs Column oriented : In row-based storage, each record (or row) is stored together, whereas in column-based storage each column is stored separately (refer image in 5)
+
+* CREATE DDL can only create the table, the dataset should have been existing or already created before (for example manually or by using Terraform). Note that dataset in BigQuery is equivalent to database in Postgres.
+
+```
+-- general syntax
+CREATE EXTERNAL TABLE `PROJECT_ID.DATASET.EXTERNAL_TABLE_NAME`
+  OPTIONS (
+    format ="TABLE_FORMAT",
+    uris = ['BUCKET_PATH'[,...]]
+    );
+
+```
+* The syntax for CREATE TABLE using SELECT is 
+```
+CREATE TABLE new_tbl [AS] SELECT * FROM orig_tbl;
+
+```
+
+* Worked on Week 3 Homework of 2025 Cohort on 6-Feb-2025. 
+
+* Before starting homework, created GCP Bucket and BigQuery Dataset using Terraform. Then add parquet files of yellow-trip data from Jan 2024 to June 2024 (from https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) to GCS bucket manually inside trip_data folder within bucket. Then ran the following code in BigQuery table
+
+```
+
+--- https://github.com/DataTalksClub/data-engineering-zoomcamp/blob/main/cohorts/2025/03-data-warehouse/homework.md
+
+CREATE OR REPLACE EXTERNAL TABLE terraform-demo-448805.trips_data_all.external_yellow_tripdata
+OPTIONS(
+  format='parquet',
+  uris = ['gs://terraform-demo-448805-terra-bucket/trip_data/yellow_tripdata_2024-*.parquet']
+);
+
+CREATE OR REPLACE TABLE terraform-demo-448805.trips_data_all.yellow_tripdata
+AS
+SELECT * FROM terraform-demo-448805.trips_data_all.external_yellow_tripdata;
+
+-- Question 1
+-- 20332093
+SELECT COUNT(*) FROM terraform-demo-448805.trips_data_all.external_yellow_tripdata;
+
+-- 20332093
+SELECT COUNT(*) FROM terraform-demo-448805.trips_data_all.yellow_tripdata;
+
+
+-- Question 2
+
+SELECT COUNT(DISTINCT PULocationID) FROM terraform-demo-448805.trips_data_all.external_yellow_tripdata;
+-- Bytes processed 155.12 MB
+SELECT COUNT(DISTINCT PULocationID) FROM terraform-demo-448805.trips_data_all.yellow_tripdata;
+
+
+-- Question 3
+-- Bytes processed 155.12 MB
+SELECT PULocationID FROM terraform-demo-448805.trips_data_all.yellow_tripdata;
+
+-- Bytes processed : 310.24 MB
+SELECT PULocationID, DOLocationID  FROM terraform-demo-448805.trips_data_all.yellow_tripdata;
+
+-- Question 4
+-- 8333
+-- Bytes processed 155.12 MB
+SELECT COUNT(*) FROM terraform-demo-448805.trips_data_all.yellow_tripdata WHERE fare_amount = 0;
+
+
+-- 8333
+-- Bytes processed 155.12 MB
+SELECT COUNT(fare_amount) FROM terraform-demo-448805.trips_data_all.yellow_tripdata WHERE fare_amount = 0;
+
+-- Question 5
+CREATE OR REPLACE TABLE terraform-demo-448805.trips_data_all.yellow_tripdata_partitioned_clustered
+PARTITION BY DATE(tpep_dropoff_datetime)
+CLUSTER BY VendorID
+AS SELECT * FROM  terraform-demo-448805.trips_data_all.yellow_tripdata;
+
+-- Question 6
+-- Bytes processed 310.24 MB
+
+SELECT DISTINCT VendorID
+FROM terraform-demo-448805.trips_data_all.yellow_tripdata
+WHERE DATE(tpep_dropoff_datetime) >= '2024-03-01' and DATE(tpep_dropoff_datetime) <= '2024-03-15';
+
+
+-- Bytes processed 26.84 MB
+SELECT DISTINCT VendorID
+FROM terraform-demo-448805.trips_data_all.yellow_tripdata_partitioned_clustered
+WHERE DATE(tpep_dropoff_datetime) >= '2024-03-01' and DATE(tpep_dropoff_datetime) <= '2024-03-15';
+
+-- Question 9
+-- Estimated Bytes Processed : This query will process 0 B when run
+-- Because COUNT(*) with no filters is a metadata operation which doesn't involve scanning rows or using slots i.e. data is 
+-- already available in the metadata
+SELECT count(*) FROM terraform-demo-448805.trips_data_all.yellow_tripdata
+```
+
+### Doubts
+1. What is the difference bw table, view and materialized view?
+2. When do we use a view or materialized view?
+3. Can we consider Big Query as a view on external data?
+4. How to create a new table from existing table?
+5. What are nested records in BigQuery and how to use them?
+
+### References
+1. https://stackoverflow.com/questions/23717568/table-vs-view-vs-materialized-view
+2. https://learn.microsoft.com/en-us/sql/relational-databases/views/views?view=sql-server-ver16
+3. https://cloud.google.com/bigquery/docs/external-data-cloud-storage
+4. https://stackoverflow.com/questions/33604080/bigquery-flattens-when-using-field-with-same-name-as-repeated-field/33621195#33621195
+5. https://medium.com/@santosh_beora/row-based-storage-vs-column-based-storage-a-beginners-guide-6e91dbadb181
+6. https://github.com/DataTalksClub/data-engineering-zoomcamp/blob/main/cohorts/2025/03-data-warehouse/homework.md
+
+
+## Milestone : Submitted Homework for 2025 Cohort Week 3 on 6-Feb-2025
+
+
+## Day 15 and 16
+### Duration : 0.5 + 1.5 hours
+
+### Learnings
+* Installed dbt using pip in a virtual environment `pip install dbt-core`
+
+
+```
+# List commands available
+dbt --help
+
+# Initialize a new dbt project
+dbt init # Set project name as taxi_rides_ny
+
+```
+* Profile : Connection details i.e. a profile contains all the details required to connect to your data warehouse
+
+* profiles.yml : This file contains the connection details for your data platform. We store profiles.yml in %USERPROFILE%\.dbt folder. We can have multiple profiles (connected to even different platforms like BigQuery and Snowflake)
+
+```
+## profiles.yml (in %USERPROFILE%\.dbt)
+## test connection using dbt debug
+
+pg-dbt-workshop:
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      user: postgres
+      password: postgres
+      port: 5432
+      dbname: production
+      schema: dbt_test_1
+      threads: 1      
+  target: dev
+
+bq-dbt-workshop:
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      project: terraform-demo-448805
+      dataset: trips_data_all
+      keyfile: C:\Users\dell\.dbt\my-creds.json      
+  target: dev
+
+```
+
+* To check whether the connection is working as expected run the `dbt debug` command from within the same folder location where dbt_project.yml is present 
+
+* Make sure service account has the necessary permissions (like BigQuery Data Editor, BigQuery User), so that dbt can create and read tables and views
+
+* When you invoke dbt from the command line, dbt parses your dbt_project.yml and obtains the profile name, which dbt needs to connect to your data warehouse. dbt then checks your profiles.yml file for a profile with the same name (it searches for profiles.yml in current working directory and then in ~/.dbt). 
+
+* Database schema :  Database schema is considered the “blueprint” of a database which describes how the data may relate to other tables. Three different types : Conceptual, Logical, Physical
+
+* Dbt schema : 
+
+* In dbt, there are three main types of objects -
+  1. Sources
+  2. Seeds
+  3. Models 
+
+* Model : Contains the data transformation logic
+ 
+* Dbt sql model : It contains data transformation logic (in sql). The data as a result of logic is put into a view or table. The models sql files only contain select statement, and dbt then wraps it with CREATE TABLE AS or CREATE VIEW AS when we do dbt run
+
+* By default dbt will create models as views and use your file name as the view or table name in the database (so if name of file in models folder is stg_green_tripdata.sql, then view created is stg_green_tripdata)
+
+* Materializations : Refers to the process of executing a computation and persisting the results into a physical storage medium, such as a disk or memory. In simple words the underlying database object that will be created to store the result of sql code. They include
+  * View : Creates database view
+  * Table : Creates database table
+  * Ephemeral : No database object created, dbt will interpolate the code from an ephemeral model into its dependent models using a common table expression (CTE)
+  * Incremental : Allow dbt to insert or update records into a table since the last time that model was run.
+
+* View (database concept): Database View is a virtual table that provides a user-friendly representation of data from one or more underlying tables. Virtual tables means that data is derived dynamically when we run the code (the query stored by the view is executed every time the view is referenced by another query)
+
+* Source : Sources refer to raw tables in your data warehouse that serves as the starting point for your data transformations. We define source in schema.yml in models folder, and then refer to it in the model file using the source macro
+
+* Seeds : Static CSV files that you can load into your data warehouse as tables. They aren’t created from SQL code in your dbt project. Used mainly for static tables like mapping data (rg map bw product id and name).
+
+* Macro : dbt macros are similar to functions in traditional programming languages, used to avoid repeated code across multiple models
+
+* Ref : A macro to use one model within another model
+
+* ~ in Linux is equivalent to %USERPROFILE% in Windows
+
+* Errors faced
+  * Runtime Error : No adapters available - Installed postgres adapter using pip install dbt-postgres
+  * Runtime Error :  Credentials in profile "bq-dbt-workshop", target "dev" invalid: Runtime Error
+    Could not find adapter type bigquery! - Installed big query adapter using pip install dbt-bigquery
+  * dbt was unable to connect to the specified database.The database returned the following error:'NoneType' object has no attribute 'close' - This was happening because dbt was not able to locate the service account creentials json file, although it was also in the .dbt folder, hence gave the absolute path of the json file
+
+* Fun fact : I had first learnt dbt on 8th March 2023 with Snowflake, but did not go beyond basics (could not find a good tutorial and did not know about Zoomcamp at that time)
+
+### Doubts
+1. Where to place profiles.yml file?
+2. Should the path to service account credential be absolute path, relative to .dbt folder or relative to the actual dbt project? (absolute path)
+3. What exactly is a schema in dbt?
+4. Is a view executed everytime? If so why use a view over a cte?
+
+### References
+1. https://docs.getdbt.com/docs/core/pip-install
+2. https://docs.getdbt.com/docs/core/connect-data-platform/profiles.yml
+3. https://www.youtube.com/watch?v=TVuLrOMvVco
+4. https://docs.getdbt.com/docs/core/connect-data-platform/connection-profiles
+5. https://docs.getdbt.com/docs/core/connect-data-platform/bigquery-setup#service-account-file
+6. https://docs.getdbt.com/docs/build/sql-models
+7. https://docs.getdbt.com/docs/build/materializations
+8. https://towardsdatascience.com/how-to-use-dbt-seeds-f9239c347711
+9. https://mbvyn.medium.com/understanding-dbt-seeds-and-sources-c5611be17d32
+
+## Day 17
+
+* Tried connecting Airflow in Docker to GCP
+
+* werkzeug.routing.BuildError: Could not build url for endpoint 'Airflow.grid' with values ['dag_id']. Did you mean 'Airflow.graph' instead?
+
+* 2025-02-08 07:58:46 airflow command error: argument GROUP_OR_COMMAND: triggerer subcommand only works with Python 3.7+, see help above. in Airflow triggerer container
+
+* You are running pip as root. Please use 'airflow' user to run pip! FYI this bug was introduced in 2.3.0 when they put a guard in place to make sure pip is never run as root. Added user airflow before pip in dockerfile
+
+* mkdir cannot create directory '/home/google-cloud-sdk' Permission denied
+
+### Doubts
+1. In docker-compose.yml , `GOOGLE_APPLICATION_CREDENTIALS: /.google/credentials/google_credentials.json`, is .google in the host system, and if so, how does Docker locate it?
+2. What does docker-compose build do? How is it different from docker-compose up?
+
+### References
+1. https://stackoverflow.com/questions/72102582/airflowdocker-composeyou-are-running-pip-as-root-please-use-user-to-run-pip
+2. https://stackoverflow.com/questions/68673221/warning-running-pip-as-the-root-user
+3. https://stackoverflow.com/questions/71111426/connecting-apache-airflowdocker-to-gcp-cloud
+
 ### TO DOS
 1. Create a Dataproc cluster from Airflow - GCP (https://www.youtube.com/watch?v=LkGFyi8S4Ys)
 2. Create a Pub Sub with Cloud Function to limit Bills on Google (https://stackoverflow.com/a/65611211)
+
+
+
