@@ -2328,12 +2328,11 @@ SELECT count(*) FROM terraform-demo-448805.trips_data_all.yellow_tripdata
 ## Milestone : Submitted Homework for 2025 Cohort Week 3 on 6-Feb-2025
 
 
-## Day 15 and 16
-### Duration : 0.5 + 1.5 hours
+## Day 15 and 16 and 17
+### Duration : 0.5 + 1.5 + 2 hours 
 
 ### Learnings
 * Installed dbt using pip in a virtual environment `pip install dbt-core`
-
 
 ```
 # List commands available
@@ -2409,17 +2408,187 @@ bq-dbt-workshop:
 
 * Seeds : Static CSV files that you can load into your data warehouse as tables. They aren’t created from SQL code in your dbt project. Used mainly for static tables like mapping data (rg map bw product id and name).
 
-* Macro : dbt macros are similar to functions in traditional programming languages, used to avoid repeated code across multiple models
+* Macro : dbt macros are similar to functions in traditional programming languages, used to avoid repeated code across multiple models (suppose we have to use the same case statement in multiple places we can create a macro). Also enable us to use if and for loop within sql. Below is a simple macro to append 2 columns (placed in the macros folder)
+
+```
+# macros/example_macro.sql
+{% macro example_macro(column1, column2) %}
+
+  {{column1}} + {{column2}}
+
+{% endmacro %}
+
+# models/example_model.sql
+
+select 
+  example_macro(first_name, last_name)
+from {{source('staging','employee_data')}}
+```
 
 * Ref : A macro to use one model within another model
 
+* Variables : To define values that are used in multiple places in the project. We create variable in dbt_project.yml file and then use it using `{{ var('...')}}` Variables can also be defined in command line (but in that case we need to give a default value for the variable, as shown below)
+
+```
+##### defining in dbt_project.yml
+
+# dbt_project.yml
+vars:
+  payment_type_values: [1, 2, 3, 4, 5, 6]
+
+##### defining in command line (by default we limit data to 100)
+
+# models/staging/stg_green_tripdata.sql
+{% if var('is_test_run', default=true) %}
+
+  limit 100
+
+{% endif %}
+
+# Command
+dbt build --select <model_name> --vars '{'is_test_run': 'false'}'
+
+```
+
+* {% set ... %} can be used to create a new variable, or update an existing one.
+
+* Packages : dbt packages are in fact standalone dbt projects, with models, macros, and other resources that tackle a specific problem area (similar to library in programming language). We can add packages to our project (like importing a library). To add a package to our project, we need to create a packages.yml and add required packages/dependencies there (similar to pyproject.toml), and then import them by using `dbt deps`
+
+* Check hub.getdbt.com to see various packages.
+
+
+* {% %} For sentences such as if and for or to call tags such as load, static, etc. {{ }} To render variables in the template.
+
 * ~ in Linux is equivalent to %USERPROFILE% in Windows
+
+* Below is code to prepare BigQuery for the dbt project
+
+```
+-- https://www.youtube.com/watch?v=Mork172sK_c&list=PLaNLNpjZpzwgneiI-Gl8df8GCsPYp_6Bs
+CREATE TABLE `terraform-demo-448805.trips_data_all.green_tripdata` AS
+SELECT * FROM `bigquery-public-data.new_york_taxi_trips.tlc_green_trips_2019`;
+
+INSERT INTO `terraform-demo-448805.trips_data_all.green_tripdata`
+SELECT * FROM `bigquery-public-data.new_york_taxi_trips.tlc_green_trips_2020`;
+
+
+CREATE TABLE `terraform-demo-448805.trips_data_all.yellow_tripdata` AS
+SELECT * FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2019`;
+
+INSERT INTO `terraform-demo-448805.trips_data_all.yellow_tripdata`
+SELECT * FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2020`;
+```
+
+* Below is code of the basic dbt project
+
+```
+### packages.yml
+packages:
+  - package: dbt-labs/dbt_utils
+    version: 1.1.1
+
+### models/staging/schema.yml
+version: 2
+
+sources:
+  - name: staging
+    database: terraform-demo-448805
+    schema: trips_data_all
+    tables:
+      - name: green_tripdata
+      - name: yellow_tripdata
+
+
+models:
+  - name: stg_green_tripdata
+
+
+
+### macros/get_payment_type_name.sql
+
+{#
+    This macro returns the description of the payment_type 
+#}
+
+{% macro get_payment_type_name(payment_type) -%}
+
+    case {{ dbt.safe_cast("payment_type", api.Column.translate_type("integer")) }}  
+        when 1 then 'Credit card'
+        when 2 then 'Cash'
+        when 3 then 'No charge'
+        when 4 then 'Dispute'
+        when 5 then 'Unknown'
+        when 6 then 'Voided trip'
+        else 'EMPTY'
+    end
+
+{%- endmacro %}
+
+
+### models/staging/stg_green_tripdata.sql
+{{
+    config(
+        materialized='view'
+    )
+}}
+
+with tripdata as (
+    select *, row_number() over (partition by vendor_id, pickup_datetime) as rn
+    from {{source('staging', 'green_tripdata')}}
+    where vendor_id is not null
+)
+
+select 
+    *,
+    {{ get_payment_type_name("payment_type") }} as payment_type_name
+
+from tripdata
+where rn=1
+
+{% if var('is_test_run', default=true) %}
+
+limit 100
+
+{% endif %}
+
+
+
+```
+* Below is the code to run the project from terminal
+
+```
+dbt deps
+
+
+dbt build
+
+
+dbt run
+
+## Run in bigquery
+SELECT
+  *
+FROM
+  `terraform-demo-448805.trips_data_all.stg_green_tripdata`;
+```
+
+
+* Some important logics in the dbt files:
+  * In stg_yellow_tripdata, we do row_number over primary key and then only keep rows where rownumber=1. This is done so that that there are no duplicates based on primary key
+  * For models in the core folder (like dim zones and fact trips), we choose table materialization, whereas for the staging models, we use view materialization. This is because the closer we go to BI layer, the faster we want data retrieval, so that business team can create reports faster and do not have any latency in get data
+  * In schema.yml database in sources is nothing but BigQuery dataset name
 
 * Errors faced
   * Runtime Error : No adapters available - Installed postgres adapter using pip install dbt-postgres
   * Runtime Error :  Credentials in profile "bq-dbt-workshop", target "dev" invalid: Runtime Error
     Could not find adapter type bigquery! - Installed big query adapter using pip install dbt-bigquery
   * dbt was unable to connect to the specified database.The database returned the following error:'NoneType' object has no attribute 'close' - This was happening because dbt was not able to locate the service account creentials json file, although it was also in the .dbt folder, hence gave the absolute path of the json file
+  *  Not found: Table terraform-demo-448805:trips_data_all.green_tripdata was not found in location US
+  *  Database Error in model stg_green_tripdata (models\staging\stg_green_tripdata.sql)
+  Unrecognized name: vendorid; Did you mean vendor_id? at [11:11]
+  *   Function not found: get_payment_type_name at [16:5]
+  compiled code at target\run\taxi_rides_ny\models\staging\stg_green_tripdata.sql - Solution refer 12 (basically macros must be called inside {{}}, I had forgot yo put the curly braces)
+
 
 * Fun fact : I had first learnt dbt on 8th March 2023 with Snowflake, but did not go beyond basics (could not find a good tutorial and did not know about Zoomcamp at that time)
 
@@ -2428,6 +2597,8 @@ bq-dbt-workshop:
 2. Should the path to service account credential be absolute path, relative to .dbt folder or relative to the actual dbt project? (absolute path)
 3. What exactly is a schema in dbt?
 4. Is a view executed everytime? If so why use a view over a cte?
+5. In CASE statement in SQL, there is nothing bw CASE and WHEN keywords. But the CASE in dbt macros looks more like a programming language CASE statement than a SQL CASE statement. How do we understand that?
+6. What is difference between {{}} and {% %} in the macros?
 
 ### References
 1. https://docs.getdbt.com/docs/core/pip-install
@@ -2439,8 +2610,12 @@ bq-dbt-workshop:
 7. https://docs.getdbt.com/docs/build/materializations
 8. https://towardsdatascience.com/how-to-use-dbt-seeds-f9239c347711
 9. https://mbvyn.medium.com/understanding-dbt-seeds-and-sources-c5611be17d32
+10. https://noahlk.medium.com/three-dbt-macros-i-use-every-day-2966b3ad9b26
+11. https://stackoverflow.com/questions/48050221/what-is-difference-between-and-in-django-templates
+12. https://discourse.getdbt.com/t/macro-isnt-working-unknown-function/11938
 
-## Day 17
+
+## Day N
 
 * Tried connecting Airflow in Docker to GCP
 
