@@ -467,7 +467,7 @@ IndexError: list index out of range
 
 
 ## Day 9
-### Duration : 1 hour
+### Duration : 15 mins
 
 ### Learnings
 * Solved 1 problem:
@@ -533,13 +533,336 @@ class Solution(object):
 
 
 ```
+
+## Day 10
+### Duration : 1.25 hours
+
+### Learnings
+
+* Solved problems:
+    * Find the next permutation for given array of numbers (eg. [1,3,2] -> [2,1,3])
+    * Simple binary search on sorted array
+    * Remove outermost parentheses from a string
+
+* Key point : The largest number which can be formed using a given set of digits is by placing them in descending order
+
+* Using the point above, we try to locate the break point i.e. first index i from the back of the given array where arr[i] becomes smaller than arr[i+1]. Because we know that number formed from breakpoint onwards is not the largest number that can be formed using given set of digits.
+
+* Once we do that, we try to find smallest number which is larger than the break point number, and put that in place of break point, and sort all the remaining numbers post the breakpoint
+
+* Missed 2 edge case scenarios initially:
+    1. When we have reached the largest possible combination for entire array (eg. [6,4,2]) (solved by adding i=-1 condition)
+    2. When we have two same digits side by side (had to change while condition from nums[i] > nums[i+1] to nums[i] >= nums[i+1])
+
+
+* Idea:  If we can track how many open and close parentheses we've seen using a counter that counts opening parenthesis, we can figure out which parentheses are the outermost ones and skip them. For outermost parentheses counter will be 1 if opening parenthesis and counter will be 0 if closing parenthesis
+
+```
+# https://leetcode.com/problems/next-permutation/
+# passed 231/266 test cases, failed for [5,1,1]
+class Solution(object):
+    def nextPermutation(self, nums):
+        length = len(nums)
+        i = length - 2
+        while nums[i] > nums[i+1]:
+            i = i - 1
+        
+        nums[i+1:] = sorted(nums[i+1:])
+
+        for j in range(i+1, length):
+            if nums[j] > nums[i]:
+                temp = nums[i]
+                nums[i] = nums[j]
+                nums[j] = temp
+                break
+        
+
+
+# Approach 1
+class Solution(object):
+    def nextPermutation(self, nums):
+        
+        length = len(nums)
+        i = length - 2
+        while nums[i] >= nums[i+1] and i >= 0:
+            i = i - 1      
+        
+        nums[i+1:] = sorted(nums[i+1:])
+
+        if i == -1:
+            return
+
+        for j in range(i+1, length):
+            if nums[j] > nums[i]:
+                temp = nums[i]
+                nums[i] = nums[j]
+                nums[j] = temp
+                break
+        
+
+# https://leetcode.com/problems/binary-search/
+class Solution(object):
+    def search(self, nums, target):
+        """
+        :type nums: List[int]
+        :type target: int
+        :rtype: int
+        """
+        left = 0
+        right = len(nums) - 1
+
+        while left <= right:
+            mid = (right + left) // 2
+            if nums[mid] > target:
+                right = mid - 1
+            elif nums[mid] < target:
+                left = mid + 1                
+            elif nums[mid] == target:
+                return mid
+
+        return -1
+
+
+# https://leetcode.com/problems/remove-outermost-parentheses/
+class Solution(object):
+    def removeOuterParentheses(self, s):
+        count = 0
+        result = ""
+        for c in s:
+            if c == "(":
+                count = count + 1
+
             
+            if c == ")":
+                count = count - 1
+
+            if c == "(" and count > 1:
+                result = result + str(c)
+            
+            if c == ")" and count > 0:
+                result = result + str(c)
+
+           
+        
+        return result
+        
+```
+### Doubts
+1. A small question: When you search the next greater element in the right half, which one is better: Binary Search or simple iteration?
+2. How do we generate all possible permutations of a given set of numbers?
+3. In binary search is it (right + left)/2 or (right - left)/2? 
+
+### References
+1. https://stackoverflow.com/questions/2272819/sort-a-part-of-a-list-in-place
+2. https://stackoverflow.com/questions/4435169/how-do-i-append-one-string-to-another-in-python
+3. https://stackoverflow.com/questions/538346/iterating-each-character-in-a-string-using-python
+
+## Day 11
+
+### Duration : 1.5 hours
+
+### Learnings
+* Solved problems:
+    * Search insert position for new element in sorted array
+    * Find first and last position of element in sorted array
+    * Binary search in rotated sorted array
+
+
+* Insertion problem is literally binary search with 2 additional conditions at the end if target not present in the array
+
+
+* In the second problem, missed edge case scenario where target is present until end like [0,0,1,1] and target=1. Also wrongly added edge condition to while loop expression instead of adding it within if statement (look below)
+
+```
+## wrong approach, will still give index out of range error
+while nums[right] == target and right == length:
+    right += 1
+  
+right -= 1
+
+## right approach
+while nums[right] == target:
+    right += 1
+    if right == length:
+        break
+
+right -= 1
+
+```
+
+* Key idea (binary search sorted) : Key idea is to compare the middle element with only the left element (not both left and right), to see which half of the array is sorted. Then we check if the number is between the two extremes of the sorted half (we can do that because we know that that half is sorted, we cannot do it for the unsorted half). Based on whether the number is in between the 2 extremes, we go ahead and shift either pointer accordingly. Note that left and right pointers change after each iteration
+
+* If an array is sorted then just looking at the first and last number gives us a good idea of the entire array
+
+*  The key point I missed is we have to look for the sorted half, and then search for the element in the sorted half using the 2 end values. Also I forgot that left and right pointer keep moving and thought they get stuck at the ends of the array
+
+```
+# https://leetcode.com/problems/search-insert-position/
+class Solution(object):
+    def searchInsert(self, nums, target):
+        """
+        :type nums: List[int]
+        :type target: int
+        :rtype: int
+        """
+        l = 0
+        r = len(nums) - 1
+
+        while l <= r:
+            mid = (l + r) // 2
+            if nums[mid]  == target:
+                return mid
+            elif nums[mid] > target:
+                r = mid - 1
+            elif nums[mid] < target:
+                l = mid + 1
+
+        if nums[mid] < target:
+            return mid + 1
+        else:
+            return mid
+
+# https://leetcode.com/problems/find-first-and-last-position-of-element-in-sorted-array/
+class Solution(object):
+    def searchRange(self, nums, target):
+        """
+        :type nums: List[int]
+        :type target: int
+        :rtype: List[int]
+        """
+
+        l = 0
+        r = len(nums) - 1
+        length = len(nums)
+
+        if len(nums) == 0:
+            return [-1, -1]
+
+        while l <= r:
+            mid = (l + r) // 2
+            if nums[mid]  == target:
+                break
+            elif nums[mid] > target:
+                r = mid - 1
+            elif nums[mid] < target:
+                l = mid + 1
+
+        if l <= r:
+            left = mid
+            right = mid
+            while nums[right] == target:
+                right += 1
+                if right == length:
+                    break
+            right -= 1
+            while nums[left] == target:
+                left -= 1
+                if left == -1:
+                    break
+            left += 1
+
+            return [left, right]
+        
+        else:
+            return [-1, -1]
+
+### https://leetcode.com/problems/search-in-rotated-sorted-array/
+# wrong code
+class Solution(object):
+    def search(self, nums, target):
+        """
+        :type nums: List[int]
+        :type target: int
+        :rtype: int
+        """
+        left = 0
+        right = len(nums) - 1
+
+        while left <= right:
+            mid = (left + right) // 2
+            if nums[mid] == target:
+                return mid
+            if nums[mid] != target:
+                if target == nums[left]:
+                    return left
+                if target == nums[right]:
+                    return right
+                if target > nums[left]:
+                    right = mid - 1
+                if target < nums[right]:
+                    left = mid + 1
+        
+        return -1
+
+# wrong code
+class Solution(object):
+    def search(self, nums, target):
+        """
+        :type nums: List[int]
+        :type target: int
+        :rtype: int
+        """
+        length = len(nums)
+        left = 0
+        right = len(nums) - 1
+
+        while left <= right:
+            mid = (left + right) // 2
+            if nums[mid] == target:
+                return mid
+            if nums[mid] > nums[left] and nums[mid] > target:
+                right = mid - 1
+            if nums[mid] > nums[left] and nums[mid] < target:
+                left =  mid + 1
+            if nums[mid] < nums[right] and nums[mid] < target:
+                left = mid + 1
+            if nums[mid] < nums[right] and nums[mid] > target:
+                right = mid - 1
+
+# Correct approach : Find element in rotated sorted array
+class Solution(object):
+    def search(self, nums, target):
+        """
+        :type nums: List[int]
+        :type target: int
+        :rtype: int
+        """
+        length = len(nums)
+        left = 0
+        right = len(nums) - 1
+
+        while left <= right:
+            mid = (left + right) // 2
+            if nums[mid] == target:
+                return mid
+            
+            if nums[left] <= nums[mid]:
+                if nums[left] <= target < nums[mid]:
+                    right = mid - 1
+                else:
+                    left = mid + 1
+            else:
+                if nums[mid] < target <= nums[right]:
+                    left = mid + 1
+                else:
+                    right = mid - 1
+                    
+
+    
+        return -1
+```
+### Doubts
+1. In rotated sorted array, should we compare array[mid] with border values or target with border values?
+2. Is the last number always less than first number in a roated sorted array?
+
+
 
 ## Day N (To be cleaned up later)
 
 ### Learnings
 
 ### Find maximum consecutive ones in an array
+```
 # https://leetcode.com/problems/max-consecutive-ones/
 class Solution(object):
     def findMaxConsecutiveOnes(self, nums):
