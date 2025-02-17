@@ -2323,7 +2323,9 @@ SELECT count(*) FROM terraform-demo-448805.trips_data_all.yellow_tripdata
 4. https://stackoverflow.com/questions/33604080/bigquery-flattens-when-using-field-with-same-name-as-repeated-field/33621195#33621195
 5. https://medium.com/@santosh_beora/row-based-storage-vs-column-based-storage-a-beginners-guide-6e91dbadb181
 6. https://github.com/DataTalksClub/data-engineering-zoomcamp/blob/main/cohorts/2025/03-data-warehouse/homework.md
-
+7. https://stackoverflow.com/questions/26079959/where-do-you-get-google-bigquery-usage-info-mainly-for-processed-data
+8. https://stackoverflow.com/questions/54812438/bigquery-count-appears-to-be-processing-data
+9. https://cloud.google.com/bigquery/docs/reference/standard-sql/lexical
 
 ## Milestone : Submitted Homework for 2025 Cohort Week 3 on 6-Feb-2025
 
@@ -2440,7 +2442,7 @@ vars:
 
 # models/staging/stg_green_tripdata.sql
 {% if var('is_test_run', default=true) %}
-
+-- at end of sql statement
   limit 100
 
 {% endif %}
@@ -2613,7 +2615,177 @@ FROM
 10. https://noahlk.medium.com/three-dbt-macros-i-use-every-day-2966b3ad9b26
 11. https://stackoverflow.com/questions/48050221/what-is-difference-between-and-in-django-templates
 12. https://discourse.getdbt.com/t/macro-isnt-working-unknown-function/11938
+13. https://stackoverflow.com/questions/71482406/how-to-set-location-of-profiles-yml-and-dbt-project-yml-files-in-dbt
+14. https://medium.com/israeli-tech-radar/dbt-database-schemas-bdd8ac9494a7
 
+
+## Day 18 and 19
+### Duration : 0.75 hours
+
+### Learnings
+
+* List of important transformations in staging area:
+  * Creating surrogate key
+  * Casting columns to right data types
+  * Normalizing the fields for union (ensuring green and yellow taxi same field names and types)
+  
+* Seeds : Static CSV files that you can load into your data warehouse as tables. They aren’t created from SQL code in your dbt project. Used mainly for static tables like mapping data. To create new table from seed, place the csv file in seeds folder and then run `dbt seed` (succesfully created table - trips_data_all.taxi_zone_lookup)
+
+* Running dbt run will run all models but NOT the seeds. The dbt build can be used instead to run all seeds and models as well as tests.Running dbt run --select my_model will only run the model itself
+
+* Primary Keys: These are unique identifiers for records in a table. 
+
+* Surrogate Keys: Artificially generated key with the sole purpose of uniquely identifying a row.This is used as primary key when your table does not have a natural primary key. Most often you'll see these implemented as integers in an automatically incrementing field, or as GUIDs that are generated automatically for each record. ID numbers are almost always surrogate keys.
+
+* Surrogate keys can be added in the analytics layer, especially when we join tables or when table does not have natural primary key. In dbt we can do that using the ` dbt_utils.generate_surrogate_key` macro. This macro concatenates the given fields and then applies a MD5 cryptographic hash.
+```
+select
+    {{ dbt_utils.generate_surrogate_key(['vendorid', 'lpep_pickup_datetime']) }} as tripid
+from
+  ...
+```
+
+* Cross-database macros : Macros which enable us to write a single piece of code that will be compatible across multiple databases
+
+* Safe cast : SAFE_CAST function returns NULL instead of throwing an error for invalid conversions (to the point). It provides a safe alternative to regular CAST by gracefully handling conversion failures. SAFE_CAST is useful when working with uncertain data types, ensuring that your queries remain robust and error-free (manager way of saying things). 
+
+* dbt can extend functionality across Supported Data Platforms (like BigQuery, Postgres, Snowflake, Redshift) through a system of multiple dispatch 
+
+* Tests are defined on a column in the model YAML files (like the schema.yml file we defined before)
+You may run tests with the dbt test command. Predefined tests available in dbt are:
+  * not_null
+  * unique
+  * accepted_values
+  * relationships (to check referential integrity)
+  We can run tests as follows
+
+```
+
+## models/staging/schema.yml
+version: 2
+
+sources:
+  - name: staging
+    database: terraform-demo-448805
+    schema: trips_data_all
+    tables:
+      - name: green_tripdata
+      - name: yellow_tripdata
+
+
+models:
+  - name: stg_green_tripdata
+    columns:
+      - name: tripid
+        description: Primary key for this table, generated with a concatenation of vendorid+pickup_datetime
+        tests:
+          - not_null:
+              severity: warn
+          - unique:
+              severity: warn
+
+
+## Activate virtual environment
+venv\Scripts\activate
+
+# Run model
+dbt run --select stg_green_tripdata
+
+# Run test
+dbt test
+
+```
+
+* On running non null test, the following sql is generated. All of the compiled sql can be found in target folder
+
+```
+-- folder : target/compiled/taxi_rides_ny/models/staging/schema.yml
+-- file : not_null_stg_green_tripdata_tripid.sql
+
+select tripid
+from `terraform-demo-448805`.`trips_data_all`.`stg_green_tripdata`
+where tripid is null
+
+```
+
+* Continuous Integration (CI): the practice of regularly merging development branches into a central repository, after which automated builds and tests are run (to ensure no bugs in prod)
+
+* dbt projects are usually deployed in the form of jobs.  Job is a collection of commands such as build or test. A job may contain one or more commands. Each job will keep a log of the runs over time. dbt makes use of GitHub/GitLab's Pull Requests to enable CI via webhooks. When a PR is ready to be merged, a webhook is received in dbt Cloud that will enqueue a new run of a CI job. This run will usually be against a temporary schema that has been created explicitly for the PR. If the job finishes successfully, the PR can be merged into the main branch, but if it fails the merge will not happen.
+
+
+*  Errors faced
+  * The YAML provided in the --vars argument is not valid when running dbt run --vars '{'is_test_run': 'false'}'
+
+
+
+### Doubts
+1. What does flat namespace for models mean in 1?
+2. What does schemas are not declarative in dbt mean?
+3. What exactly is difference bw primary key and surrogate key? When do we use surrogate keys?
+4. In stg_green_data.sql, why have we used cast for some fields and safe_cast for others?
+5. What exactly is multiple dispatch?
+
+### References
+1. https://www.reddit.com/r/dataengineering/comments/zamewl/whats_wrong_with_dbt/
+2. https://stackoverflow.com/questions/36773011/what-is-the-difference-between-a-primary-key-and-a-surrogate-key
+3. https://stackoverflow.com/questions/1714148/when-not-to-use-surrogate-primary-keys
+4. https://popsql.com/learn-dbt/dbt-utils-surrogate-keys
+5. https://www.castordoc.com/how-to/how-to-do-type-casting-in-bigquery
+6. https://docs.getdbt.com/faqs/Runs/checking-logs
+7. https://stackoverflow.com/questions/72799237/only-run-a-set-of-models
+8. https://github.com/ziritrion/dataeng-zoomcamp/blob/main/notes/4_analytics.md
+9. https://docs.getdbt.com/reference/resource-properties/data-tests
+
+
+
+## Day 20 + 
+### Duration : 0.75 +  hours
+### Learnings
+* Spark is a data processing engine i.e. it does processing of data using multiple machines
+
+* Spark has concept of partitioning so that is can leverage multiple machines or the concepts of parallelism and thus process huge data faster
+
+* Spark has repartitioning so that we can ensure optimal usage of executors. Suppose there are 10 executors and only 2 paritions, then other 8 executor will be idle. But if we have 10 or 20 partitions of data, then all executors will be used, and processing will be much faster
+
+* Hive : Enables us to run SQL against the data in the Data lake (which are in parquet format). Even External tables in Big Query, Presto and Athena enables us to do same thing. 
+
+* Hive is an interface which helps us to write SQL on parquet files
+
+* Spark vs Hive/Presto/Athena : If we can express job as SQL code use Hive/Presto, if we need more pf Python (for eg Machine Learning jobs), then Spark is prefered
+
+* Schema : Info about column names and their types i.e. the structure of the data 
+
+* Custom Schema : We can make Spark automatically infer schema by setting inferSchema as True, or we can define our own custom schema using StructType and StructField
+
+* Lazy evaluation and DAG : Spark does not execute the code as soon as we run it. Lazy evaluation is a feature in Spark, which holds off on executing transformations until an action is executed.
+
+* Transformation: A transformation are functions that return another RDD
+
+* Action : Does not return another RDD instead actions trigger the scheduler and thus instruct Spark to actually perform computations on the real dataset and return the results. 
+
+* Then scheduler builds a directed acyclic graph (DAG) as a plan of execution. The plan of execution is created by working backward to define the series of steps required to produce the final distributed dataset (each Partition) (that is why we see the execution plan in reverse order of the actual working)
+
+* User-Defined Functions (UDFs) are user-programmable routines that act on one row 
+
+```
+### user defined function (refer 4)
+
+```
+
+
+
+### Doubts
+1. Why do we partition or repartition data?
+2. What is the difference between spark driver and master?
+3. Does Spark same the data or use entire data to infer column type when inferSchema is true?
+4. What are some real world scenarios when using UDFs make sense?
+
+
+### References
+1. https://stackoverflow.com/questions/34722415/understand-spark-cluster-manager-master-and-driver-nodes
+2. https://stackoverflow.com/questions/72602602/how-does-pyspark-decides-data-type-of-a-column-automatically-when-inferschema-is
+3. https://community.databricks.com/t5/data-engineering/what-is-difference-between-action-and-transformation-in-spark/td-p/26612
+4. https://medium.com/@suffyan.asad1/a-deeper-look-into-spark-user-defined-functions-537c6efc5fb3
 
 ## Day N
 
@@ -2639,6 +2811,5 @@ FROM
 ### TO DOS
 1. Create a Dataproc cluster from Airflow - GCP (https://www.youtube.com/watch?v=LkGFyi8S4Ys)
 2. Create a Pub Sub with Cloud Function to limit Bills on Google (https://stackoverflow.com/a/65611211)
-
 
 
