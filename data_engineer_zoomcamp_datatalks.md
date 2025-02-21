@@ -2738,12 +2738,16 @@ where tripid is null
 
 
 
-## Day 20 + 
-### Duration : 0.75 +  hours
+## Day 20 + 21
+### Duration : 0.75 + 0.75 hours
 ### Learnings
 * Spark is a data processing engine i.e. it does processing of data using multiple machines
 
 * Spark has concept of partitioning so that is can leverage multiple machines or the concepts of parallelism and thus process huge data faster
+
+* spark-submit : A command line tool that takes a JAR file or a Python file as input along with the application’s configuration options and submits the application to the cluster. Hence spark-submit is the link between the client machine and the cluster 
+
+* After spark submit, Spark launches a driver program on one of the nodes in the cluster (master node), which coordinates the execution of the application’s tasks on the cluster’s worker nodes.
 
 * Spark has repartitioning so that we can ensure optimal usage of executors. Suppose there are 10 executors and only 2 paritions, then other 8 executor will be idle. But if we have 10 or 20 partitions of data, then all executors will be used, and processing will be much faster
 
@@ -2772,6 +2776,127 @@ where tripid is null
 
 ```
 
+* Spark group by : In first pass, group by happens within each partition and result is stored in temporary intermediate files (eg. if we have GROUP by region, intermediate result will have east, west, etc results for each partition). Then data from all partitions is combined for the final result.
+
+* Spark join : Spark join types include
+  * Exchange Merge Join (2 similar sized datasets)
+  * Broadcast Join (when one of the 2 datasets is small)
+
+
+*  Exchange Merge Join : Basically bring rows with the same keys from both tables to same executor, then merge them. Key is basically a tuple of the group by fields
+```
+df_join = df_green_revenue_tmp.join(df_yellow_revenue_tmp, on=['hour', 'zone'], how='outer')
+```
+Key in above code will be (hour, zone) and Value will be tuple of all the other fields. Hence
+```
+(K, V) = ((hour, zone), (total_amount))
+```
+When we say we bring rows with same keys together, it means all rows having the same hour (eg. 10) and zone (eg. green) will be brought together (eg. K = (10, 'green')) and then reduced to one row
+
+![Join in Spark example]()
+
+* Broadcast join : If dataset is very small, it is sent to all the executors, hence no need of shuffling 
+
+* API (application programming interface) : API is a software intermediary that allows two applications to talk to each other. It is a structured way for one program to offer services to other programs, thus making it easy for us to use the program.
+
+* Spark API : The Spark APis makes is easy for us developers to use Spark. Key APIs are
+  * RDD
+  * Dataframe API
+  * Dataset API
+
+* RDD (Resilient Distributed Dataset): RDD was the primary user-facing API in Spark since its inception (only available API in Spark 1.x). At the core, an RDD is our data distributed across nodes in your cluster and can be operated in parallel
+
+* RDD vs Dataframe API:
+
+```
+### Using DataFrame API
+spark.sql(
+ """ 
+  SELECT 
+    date_trunc('hour', lpep_pickup_datetime) AS hour, 
+    PULocationID AS zone,
+
+    SUM(total_amount) AS amount,
+    COUNT(1) AS number_records
+FROM
+    green
+WHERE
+    lpep_pickup_datetime >= '2020-01-01 00:00:00'
+GROUP BY
+    1, 2
+"""
+)
+
+
+### Using RDD
+from datetime import datetime
+
+start = datetime(year=2020, month=1, day=1)
+
+def filter_outliers(row):
+    return row.lpep_pickup_datetime >= start
+
+def prepare_for_grouping(row): 
+    hour = row.lpep_pickup_datetime.replace(minute=0, second=0, microsecond=0)
+    zone = row.PULocationID
+    key = (hour, zone)
+    
+    amount = row.total_amount
+    count = 1
+    value = (amount, count)
+
+    return (key, value)
+
+# we get 2 value tuples from 2 separate records as input
+def calculate_revenue(left_value, right_value):
+    # tuple unpacking
+    left_amount, left_count = left_value
+    right_amount, right_count = right_value
+    
+    output_amount = left_amount + right_amount
+    output_count = left_count + right_count
+    
+    return (output_amount, output_count)
+
+from collections import namedtuple
+RevenueRow = namedtuple('RevenueRow', ['hour', 'zone', 'revenue', 'count'])
+def unwrap(row):
+    return RevenueRow(
+        hour=row[0][0], 
+        zone=row[0][1],
+        revenue=row[1][0],
+        count=row[1][1]
+    )
+
+from pyspark.sql import types
+
+result_schema = types.StructType([
+    types.StructField('hour', types.TimestampType(), True),
+    types.StructField('zone', types.IntegerType(), True),
+    types.StructField('revenue', types.DoubleType(), True),
+    types.StructField('count', types.IntegerType(), True)
+])
+
+rdd \
+    .filter(filter_outliers) \ # similar to WHERE clause
+    .map(prepare_for_grouping) \ # preparation step of GROUP BY clause
+    .reduceByKey(calculate_revenue) \ # aggregation step of GROUP BY clause
+    .map(unwrap) \ # unwrapping output to make it more usable
+    .toDF(result_schema)
+```
+Note that what we have done above is the MAP REDUCE concept which used to be popular in Haddop. The MAP step separates the GROUP BY fields as key and values to be aggregated as value to form a tuple : (key, value)
+
+
+```
+docker run --rm -d --name spark-container \
+-p 4040:4040 -p 4041:4041 -p 18080:18080 \
+-v ./app:/home/sparkuser/app -v ./event_logs:/home/spark/event_logs \
+spark-dp-101:latest jupyter
+https://medium.com/@sanjeets1900/setting-up-apache-spark-from-scratch-in-a-docker-container-a-step-by-step-guide-2c009c98f2a7
+```
+
+* https://github.com/whole-tale/all-spark-notebook/blob/master/README.md
+docker run -it --rm -p 8888:8888 jupyter/all-spark-notebook
 
 
 ### Doubts
@@ -2779,13 +2904,182 @@ where tripid is null
 2. What is the difference between spark driver and master?
 3. Does Spark same the data or use entire data to infer column type when inferSchema is true?
 4. What are some real world scenarios when using UDFs make sense?
-
+5. In broadcast join, after the join is done in each executor, is there not a shuffle to get the final result from all the partial results (present in each executor)?
+6. In broadcast join, what if smaller dataset has more than one partition?
+7. In group by, if the aggregation is average, how is averaging done in the first pass i.e. within each partition?
+8. In the dataframe API, if two joining tables have same columns for non-joining fidls, how do we rename them post join? (rename them before join using withColumnRenamed)
+9. What is SparkSesion and how does it differ from spark-submit?
 
 ### References
 1. https://stackoverflow.com/questions/34722415/understand-spark-cluster-manager-master-and-driver-nodes
 2. https://stackoverflow.com/questions/72602602/how-does-pyspark-decides-data-type-of-a-column-automatically-when-inferschema-is
 3. https://community.databricks.com/t5/data-engineering/what-is-difference-between-action-and-transformation-in-spark/td-p/26612
 4. https://medium.com/@suffyan.asad1/a-deeper-look-into-spark-user-defined-functions-537c6efc5fb3
+5. https://www.databricks.com/blog/2016/07/14/a-tale-of-three-apache-spark-apis-rdds-dataframes-and-datasets.html
+6. https://github.com/ziritrion/dataeng-zoomcamp/blob/main/notes/5_batch_processing.md
+7. https://medium.com/@mojtaba81/introduction-to-spark-submit-d22cde2dfa86
+
+## Day 22
+### Duration : 4.5 hours
+
+### Learnings
+* Spent over 2 hours trying to connect Spark to Kafka in Docker, but was not successful. Hence decided to focus on just learning Spark Streaming with using ncat or files as source and console as sink. Based on tutorial by Youtube channel Ease with Data (https://www.youtube.com/playlist?list=PL2IsFZBGM_IEtp2fF5xxZCS9CYBSHV2WW)
+
+* Stateful Stream processing : it means that you need to somehow combine the new data with old records or previous batches
+
+* State : A collection of keys and their current values
+
+* Spark state is kept on the file system in checkpointLocation (if the checkpoint directory is not defined, then stream-related data (commits/offsets) and state will be provided in Spark temporary directory)
+
+* Ncat : A general-purpose command-line tool for reading, writing, redirecting, and encrypting data across a network.
+
+* l flag : Bind and listen for incoming connections
+
+* Setup spark container using docker-compose file from https://github.com/subhamkharwal/docker-images/blob/master/pyspark-jupyter-kafka/docker-compose.yml, but used only pyspark-jupyter container (could have as well done docker run jupyter/pyspark-notebook:spark-3.3.0). Then setup ncat within pyspark jupyter container as follows
+
+```
+# setup ncat within pyspark jupyter container
+
+docker exec -it <spark-container-id> /bin/sh
+sudo apt-get update
+sudo apt-get install ncat 
+ncat -v
+ncat -l 9999
+```
+
+* Opened jupyter notebook by going to Logs of pyspark-jupyter container within Docker Desktop, and then opening url from there within browser. Then created simple code below which directly outputs whatever is entered in ncat onto the console (i.e. the Logs within DOcker desktop container)
+
+```
+#### stream data from input to console as is
+
+from pyspark.sql import SparkSession
+from pyspark.sql import Row
+from pyspark.sql.types import StringType
+
+spark = SparkSession \
+        .builder \
+        .appName("word_count") \
+        .master("local") \
+        .getOrCreate()
+
+# we are reading data from socket, hence format is "socket"
+df_raw = spark.readStream.format("socket").option("host","localhost").option("port","9999").load()
+
+df_raw.writeStream.format("console").start().awaitTermination()
+
+```
+
+* master function within Spark Session builder sets the Spark master URL to connect to. `master("local[*]")` will run spark in self-contained/standalone mode. In this mode spark can utilize only the resources of the local machine.
+
+
+```
+#### streaming application to get word count in real time
+
+
+from pyspark.sql import SparkSession
+from pyspark.sql import Row
+from datetime import datetime, date
+from pyspark.sql.types import StringType
+from pyspark.sql.functions import split, col, explode, count, lit
+
+#create spark session
+spark = SparkSession \
+        .builder \
+        .appName("word_count") \
+        .master("local") \
+        .getOrCreate()
+
+df_raw = spark.readStream.format("socket").option("host","localhost").option("port","9999").load()
+
+# split text using space, which creates an array. Then explode the array to have a each word of array as a new row
+df =  df_raw.withColumn("words", explode(split(col("value"), " "))).select("words")
+
+# count the frequency of each word
+df = df.groupBy(col("words")).agg(count(lit(1).alias("word_count")))
+
+# using output mode as complete, get the results and send to console, do not terminate program until manual termination
+df.writeStream.format("console").outputMode("complete").start().awaitTermination()
+
+```
+
+* Modes in spark streaming:
+  * complete : The entire updated Result Table will be written to the external storage. 
+  * update : only the rows that were updated in the Result Table since the last trigger will be written to the external storage
+  * append(ignore for now): only the new rows appended in the Result Table since the last trigger will be written to the external storage
+  For example consider the word count code above. The output for complete and update mode for the following inputs will be as below
+
+```
+input1 : cat dog
+input2 : dog car
+input3 : cat car
+
+Update mode:
+output1 : cat - 1, dog-1
+output2 : dog - 2, car-1
+output3 : cat - 2, car-2 (no dog as it was not updated for input3)
+
+Append mode:
+output1 : cat - 1, dog-1
+output2 : cat - 1, dog-2, car-1
+output3 : cat - 2, dog-2, car-2
+
+```
+
+* Was able to run Kafka separately using InfoLead tutorial (but could not connect to spark)
+
+```
+# bash into zookeeper container
+docker exec -it 1d00af303f83 /bin/sh
+
+kafka-topics --create --bootstrap-server kafka:9092 --replication-factor 1 --partitions 1 --topic input
+
+kafka-topics --create --bootstrap-server kafka:9092 --replication-factor 1 --partitions 1 --topic output
+
+```
+
+* Errors faced
+  * Failed to find data source: kafka. Please deploy the application as per the deployment section of "Structured Streaming + Kafka Integration Guide"
+  * TypeError: StructType can not accept object 'Hello world' in type <class 'str'> - Reason : With single element you need a schema as type
+```
+### wrong apporach
+df = spark.createDataFrame([('Hello world'),('How are you')], schema="a string")
+
+
+### right approach 1
+df = spark.createDataFrame([('Hello world'),('How are you')], schema="string").toDf("a")
+
+### right approach 2
+from pyspark.sql.types import StringType
+df = spark.createDataFrame([('Hello world'),('How are you')], schema=StringType()).toDf("a")
+
+```
+  * Got error when running sudo apt-get install ncat before sudo apt-get update
+  * StreamingQueryException: Query [id = 3a639b1d-f404-40c8-88de-4a8566a40e0b, runId = 113b0447-e787-4c01-bac3-e5dc783d90ae] terminated with exception: Connection refused Reason: Need to close the ncat and then restart ncat using `ncat -l 9999`, then rerun the cell in Jupyter
+  * AnalysisException: Append output mode not supported when there are streaming aggregations on streaming DataFrames/DataSets without watermark, Reason : Needed to use either complete or update mode, not append mode
+
+
+
+
+### Doubts
+1. What is Kafka listener and advertised listener in Dockerfile?
+2. What exactly is spark submit and why is is required? Is it required if we use master a local?
+3. How to find the master URL for an existing spark cluster?
+4. Is it right to say that standalone mode always uses client mode but not vice versa i.e. client mode can have master which is not local?
+5. How to access jupyter notebook running in docker container?
+6. How is spark able to do stateful stream processing i.e. combine the past data with the new data and get the final result?
+7. Can aggregations work with append mode in spark streaming?
+
+### References
+1. https://stackoverflow.com/questions/47674311/how-to-create-a-sample-single-column-spark-dataframe-in-python
+2. https://man7.org/linux/man-pages/man1/ncat.1.html
+3. https://stackoverflow.com/questions/33504798/how-to-find-the-master-url-for-an-existing-spark-cluster
+4. https://stackoverflow.com/questions/76238105/running-kafka-and-spark-with-docker-compose
+5. https://mvnrepository.com/artifact/org.apache.kafka/kafka-clients/2.4.1
+6. https://stackoverflow.com/questions/70374571/connecting-pyspark-with-kafka
+7. https://polarpersonal.medium.com/state-storage-in-spark-structured-streaming-e5c8af7bf509
+8. https://www.youtube.com/watch?v=pRb1bfVUTZk
+9. https://stackoverflow.com/questions/48927192/what-is-the-real-difference-between-append-mode-and-update-mode-in-spark-streami
+10. https://www.youtube.com/playlist?list=PL2IsFZBGM_IEtp2fF5xxZCS9CYBSHV2WW
 
 ## Day N
 
@@ -2811,5 +3105,5 @@ where tripid is null
 ### TO DOS
 1. Create a Dataproc cluster from Airflow - GCP (https://www.youtube.com/watch?v=LkGFyi8S4Ys)
 2. Create a Pub Sub with Cloud Function to limit Bills on Google (https://stackoverflow.com/a/65611211)
-
-
+3. Create flowcharts using Mermaid (as seen in Alvaro notes)
+4. Check how to connect spark to kafka in Docker (https://github.com/asaf-erlich/docker-kafka-spark/tree/master)
