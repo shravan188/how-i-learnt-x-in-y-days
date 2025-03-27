@@ -303,6 +303,40 @@ docker-compose down
 
 * Had to chose version 2 of docker compose as for docker-compose version 2 file format, you can build and tag an image for one service and then use that same built image for another service. From 1.6 onwards, we can give path for image key
 
+* ACL (Access Control List) : Examines a statement and returns either true or false. You can use ACLs in many scenarios, including routing traffic, blocking traffic, and transforming messages. Used with an if statement. Tried using ACL for routing traffic as shown below, but did not work
+
+```
+# haproxy.cfg (not working as expected)
+global
+
+defaults
+    mode http
+    timeout connect 5000ms
+    timeout client 5000ms
+    timeout server 5000ms
+
+frontend http-in
+    bind *:5001
+
+    acl has_web1 path_beg /web1
+    acl has_web2 path_beg /web2
+    use_backend web1 if has_web1
+    use_backend web2 if has_web2
+    default_backend web1
+
+backend web1
+    server web1 web1:5001 check
+    
+backend web2
+    server web2 web2:5001 check
+
+
+```
+
+* Haproxy has 3 proxies : frontend, backend, listen
+
+* chroot (Linux command) : chroot is an operation on Unix and Unix-like operating systems that changes the apparent root directory for the current running process and its children.
+
 ### Doubts
 1. HAProxy vs Flask - when to use which?
 2. Why can we use HAProxy to handle HTTP traffic?
@@ -312,17 +346,261 @@ docker-compose down
 6. What is Difference between frontend/backend and listen in haproxy?
 7. What is dig in Ubuntu, and how to run it on windows?
 8. Why use pgbouncer?
+9. Does docker compose up automatically do docker compose build? Suppose we change a file say haproxy.cfg, do we need to build again? 
+10. How are chroot and docker similar? How are they different?
+
 ### References
 1. https://www.freecodecamp.org/news/how-to-dockerize-a-flask-app/
 2. https://github.com/docker/compose/issues/9441
-3. https://www.youtube.com/watch?v=PtT32MW2j9c
+3. https://www.youtube.com/watch?v=PtT32MW2j9c (How to Compose Multiple Web Apps With Docker)
 4. https://stackoverflow.com/questions/39209917/difference-between-frontend-backend-and-listen-in-haproxy
 5. https://stackoverflow.com/questions/5673335/how-to-configure-haproxy-to-send-get-and-post-http-requests-to-two-different-app
 6. https://github.com/jonnylangefeld/docker-load-balance-test/tree/remove-unnecessary-stuff
 7. https://parottasalna.com/2024/09/10/haproxy-ep-2-tcp-proxy-for-flask-application/
+8. https://www.reddit.com/r/docker/comments/uc99p3/docker_compose_do_i_need_to_run_docker_compose/?rdt=50925
 
 
+## Day 5
+* Haproxy key concepts : Configuration file, defaults, frontend, backend, listen, acl (access control list), resolver, balance(load balancing algorithms), retries, redispatch
 
+* Frontend : A frontend section defines the IP addresses and ports that clients can connect to
+
+* Backend : Backend section defines a pool of servers to which the load balancer will route requests
+
+* Listen : Listen section serves as both a frontend, which listens to incoming traffic, and a backend, which specifies the web servers to which the load balancer sends the traffic. It's paricularly useful for TCP because such configurations are usually simpler than HTTP.
+
+* Below is an example of replacing frontend+backend with listen
+
+```
+## haproxy.cfg (old)
+global
+    log stdout format raw daemon debug
+
+defaults
+    log global
+    mode http
+    timeout connect 5000ms
+    timeout client 5000ms
+    timeout server 5000ms
+
+frontend http-in
+    bind *:5001
+    default_backend web1
+
+backend web1
+    balance roundrobin
+    server web1 web1:5001 check
+    server web2 web2:5001 check
+
+
+## haproxy.cfg (new)
+global
+    log stdout format raw daemon debug
+
+defaults
+    log global
+    mode http
+    timeout connect 5000ms
+    timeout client 5000ms
+    timeout server 5000ms
+
+listen http-proxy
+    bind *:5001
+    balance roundrobin
+    server web1 web1:5000 check
+    server web2 web2:5000 check
+
+
+```
+
+* Frontend/Backend vs Listen : In a frontend section, you need default_backend web, explicitly defining where traffic should go. In a listen section, the servers inside it are automatically treated as the backend.
+
+* Because of previous point, we have to define a server in listen proxy, else we get `503 Service Unavailable : No server is available to handle this request` (we can add maintenance file for this scenario using errorfile keyword)
+
+* Proxy modes : http and tcp
+
+* Load balancing algorithms available for backend proxy are (refer 9 for detailed design considerations):
+    * roundrobin : send traffic in a round robin fashion
+    * leastconn : send traffic to the server with the fewest number of connections.
+    * static-rr
+    * random
+    * first : The first server with available connection slots receives theconnection
+    * source
+
+* Resolver : Resolvers section lists DNS nameservers that the load balancer will query when it needs to resolve a hostname to an IP address. A DNS nameserver is a specialized server within the Domain Name System (DNS) that translates human-readable domain names (like example.com) into IP addresses (like 192.0.2.1)
+
+* The key reason the haproxy config file with acl was not working on Day 4 was not because of any error in HAProxy, but it was because the routes were not defined in the Flask application. Once I added /web1 and /web2 routes to the Flask app, it started working as expected
+
+```
+## haproxy/haproxy.cfg
+global
+    log stdout format raw daemon debug
+
+defaults
+    log global
+    mode http
+    timeout connect 5000ms
+    timeout client 5000ms
+    timeout server 5000ms
+
+frontend http-in
+    bind *:5001
+
+    acl has_web1 path_beg /web1
+    acl has_web2 path_beg /web2
+    
+    use_backend web1 if has_web1
+    use_backend web2 if has_web2
+    
+    default_backend web1
+
+backend web1
+    server web1 web1:5000 check
+    
+backend web2
+    server web2 web2:5000 check
+
+## haproxy/Dockerfile
+FROM haproxy:2.2.33
+
+COPY haproxy.cfg /usr/local/etc/haproxy/haproxy.cfg
+
+
+## app.py
+
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/')
+def hello_geek():
+    return '<h1>Hello from Flask and Docker. Hope you have a great day</h1>'
+
+@app.route('/web1')
+def hello_geek_w1():
+    return '<h1>Hello from web1. Hope you have a great day</h1>'
+
+@app.route('/web2')
+def hello_geek_w2():
+    return '<h1>Hello from web2. Hope you have a great day</h1>'
+
+
+if __name__ == "__main__":
+    app.run(host ='0.0.0.0', port = 5000, debug = True) 
+
+
+## docker-compose.yml
+
+version: "2"
+
+services:
+  web1:
+    build: .
+    container_name: web1
+    
+  web2:
+    build: .
+    container_name: web2    
+
+  haproxy:
+    build: ./haproxy
+    container_name: haproxy
+    ports:
+      - "5001:5001"
+
+
+## docker-compose up --build
+```
+
+* HAProxy queries nameservers (192.168.2.10, 192.168.3.10) for backend hostname resolution. The nameserver first checks if it has a cached DNS record for hostname1.example.com. If the cache has expired, it queries authoritative DNS servers to get an updated IP. If hostname1.example.com is managed by AWS Route 53, the nameserver queries AWS's authoritative DNS servers (say it gets back 10.0.1.200).
+
+* Below some key networking concepts have been explored such as
+    * Network address and Host address
+    * Network and netwrok mask, Subnet and subnet mask
+    * Default gateway
+    * Domain Name system
+
+* The network address is used to identify the network and is common to all the devices attached to the network. The host (or node) address is used to identify a particular device attached to the network. 
+
+* A subnet is when you divide a network into several sub networks. Let's take the network above (192.168.xxx.xxx) and say we want to split it by office floor or something: 192.168.1.xxx for the first floor, 192.168.2.xxx for the second floor, etc. Each of these is a subnet.
+
+* A subnet mask is like a network mask, but for a subnet. So in the example above, the subnet mask for each floor is 255.255.255.0 because now only the last number can change, the first three are the prefix of that subnet.
+
+* A default gateway is the IP address of the router that will deal with IP's that are outside of a particular network. Now we have a specific machine on the second floor: 192.168.2.14.
+    * If this machine sends a message to 192.168.2.10, by applying the subnet mask you know you're in the same network, and the message will be sent directly to that address.
+    * If this machine sends a message to 192.168.1.12 (a computer on the first floor), by applying the subnet mask you know you are not in the same network, as you'd expect a 2 in third place. So you can't send it directly to the destination. What you do instead is send it to the default gateway of your network: 192.168.2.1. This gateway is also part of the whole building network. By applying the network mask of the whole building (255.255.0.0) we know the destination IP is in that network, and we can send the message on its merry way to the subnetwork on the first floor.
+    * If the source machine sends a message to 173.194.34.0 (google.com), by applying the subnet mask, we know we are not in the right network, so we send the message to the default gateway: 192.168.2.1. That gateway will apply the network mask for the whole building, and will know we are still not in the right network, so it will forward the message to the default gateway for the whole network: 192.168.0.1. This default gateway will recognize the address as an internet address and sends it to the internet connection on its way to the Google address.
+
+* Network mask : To tell what part of IP address is network address.
+
+* DNS, or the Domain Name System, acts as the internet's "phone book," translating human-readable domain names (like "www.example.com") into IP addresses (like "192.0.2.1") that computers use to communicate
+
+* Docker containers communicate with the host machine using various methods, including bridge networks, host networks, and a special DNS name (host.docker.internal), allowing access to services running on the host from within containers
+
+* DNS is not supported in the default bridge network. That is where we can create a custom bridge network and leverage DNS (as shown in 6)
+
+* Tried bashing into system, and then pinging other docker containers using their ip was able to do it successfully
+    1. Get the docker network name using `docker network ls` and then inspect it using `docker network inspect <network-name>`, to get ip address of all connected containers
+    2. Bash into the container using `docker exec -it <container-id> sh`
+    3. Ping the other containers ip addresses using `ping <ip-address>`
+
+* Failover management : if one backend server goes down, traffic is automatically routed to the available server. In Haproxy we do it using `option redispatch` and `backup` as shown below
+
+```
+global
+    log stdout format raw daemon debug
+
+defaults
+    log global
+    mode http
+    option httplog          # Enable detailed HTTP logging
+    timeout connect 5000ms
+    timeout client 5000ms
+    timeout server 5000ms
+
+listen http_proxy
+    bind *:5001
+    balance roundrobin      # Load balance traffic
+
+    option redispatch       # Send requests to a healthy server if the chosen one fails
+    # Health check settings
+    # Health check interval (every 2 seconds). 
+    # Server is marked as "DOWN" if it fails 3 consecutive health checks
+    # Server is marked as "UP" after 2 successful health checks.
+    default-server inter 2s fall 3 rise 2  
+
+    server web1 web1:5000 check
+    server web2 web2:5000 check backup
+
+```
+
+* In the above config requests are still round-robin balanced between web1 and web2, although web2 is marked as backup. If we want 
+
+* Errors :
+    * Starting frontend GLOBAL: cannot bind UNIX socket [/run/haproxy/admin.sock] (refer 1 for soln)
+    * Server web1/web1 is DOWN, reason: Layer4 connection problem, info: "Connection refused", 
+
+### Doubts
+1. What is a resolver?
+2. What is /16 after ipv4 address?
+3. How could I ping my docker container from my host
+4. What is iptables?
+5. How and from where do the nameservers fetch the updated ip?
+6. What is ssl/tls?
+7. What if there is no server defined in listen proxy?
+
+### References
+1. https://stackoverflow.com/questions/30101075/haproxy-doesnt-start-can-not-bind-unix-socket-run-haproxy-admin-sock
+2. https://stackoverflow.com/questions/40729125/layer4-connection-refused-with-haproxy
+3. https://www.reddit.com/r/explainlikeimfive/comments/vlyj4/explain_truly_like_im_5_what_a_default_gateway/?rdt=37836
+4. https://unix.stackexchange.com/questions/561751/what-does-this-mean-16-after-an-ip-address
+5. https://stackoverflow.com/questions/39216830/how-could-i-ping-my-docker-container-from-my-host
+6. https://www.youtube.com/watch?v=fBRgw5dyBd4
+7. https://stackoverflow.com/questions/17157721/how-to-get-a-docker-containers-ip-address-from-the-host
+8. https://stackoverflow.com/questions/57112326/haproxy-get-logs-from-docker-container
+9. https://www.haproxy.com/documentation/haproxy-configuration-manual/latest/#balance
+10. https://stackoverflow.com/questions/39209917/difference-between-frontend-backend-and-listen-in-haproxy
+11. https://www.haproxy.com/blog/failover-and-worst-case-management-with-haproxy
 
 ### Extres
 1. https://www.youtube.com/watch?v=RHwglGf_z40&t=1529s - Patroni
