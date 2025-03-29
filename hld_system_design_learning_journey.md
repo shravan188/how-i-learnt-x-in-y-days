@@ -860,5 +860,362 @@ kubectl get deployments
 22. https://github.com/smriti111/django-postgresql-kubernetes
 23. https://stackoverflow.com/questions/54821044/how-to-stop-pause-a-pod-in-kubernetes
 
+
+## Day 7
+
+* The ImagePullBackOff error is a common error message in Kubernetes that occurs when a container running in a pod fails to pull the required image from a container registry.
+
+* Module vs Package (Python) : The module is a single Python file that can be imported into another module. A package is a collection of Python modules: while a module is a single Python file, a package is a directory of Python modules containing an additional __init__.py file, to distinguish a package from a directory that just happens to contain a bunch of Python scripts. Packages can be nested to any depth, provided that the corresponding directories contain their own __init__.py file.
+
+
+* Created simple Flask application that I want to containerize and then deploy to a Kubernetes pod
+```
+## app.py
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/')
+def hello_geek():
+    return '<h1>Hello from Flask and Docker and Kubernetes. Hope you have a very great day</h1>'
+
+
+if __name__ == "__main__":
+    app.run(host ='0.0.0.0', port = 4000, debug = True)
+
+
+## Dockerfile
+FROM python:3.9-alpine3.20
+
+WORKDIR /flask-app
+
+COPY app.py app.py
+
+RUN pip3 install flask
+
+CMD ["python3","app.py"]
+
+## In terminal run : docker build . -t localhost:4000/my-flask-image
+
+```
+
+* Below are the steps to use a local docker image in the kubernetes deployment.yaml. (trick is to create local registry and push image to that)
+
+```
+# create local docker registry
+docker run -d -p 4000:5000 --restart=always --name registry registry:2
+
+# run from folder containing the files app.py(flask app) and Dockerfile
+docker build . -t localhost:4000/my-flask-image
+
+# push to local registry
+docker push localhost:4000/my-flask-image
+
+### Use this image (localhost:4000/my-flask-image) in the deployment.yaml for image key, with imagePullPolicy as IfNotPresent. Also modify port on services.yml
+
+# deploy flask on kubernetes
+kubectl apply -f deployment.yaml
+kubectl apply -f services\service.yaml
+kubectl get deploy
+kubectl scale deployment example-deploy --replicas=2 
+
+## visit localhost and you should see the flask app
+```
+
+
+* Once this was done goal was to deploy a flask app on Kubernetes and connect that a Postgres database running outside the Kubernetes cluster
+
+* To use poetry only for package management, follow the steps below. First create the following pyproject.toml file. The key thing is to set `package-mode = false`, since we are using it only for dependency mgmt. In this mode, metadata such as name and version are optional. 
+
+```
+## pyproject.toml
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.9"
+
+[tool.poetry.group.dev.dependencies]
+
+[tool.poetry.group.test.dependencies]
+
+[tool.poetry.extras]
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
+
+```
+
+* Poetry will detect and respect an existing virtual environment that has been externally activated. This is a powerful mechanism that is intended to be an alternative to Poetry’s built-in, simplified environment management.To take advantage of this, simply activate a virtual environment using your preferred method or tooling, before running any Poetry commands that expect to manipulate an environment.
+
+
+* Set up virtual environment for flask app as follows
+```
+virtualenv venv
+
+# so that poetry uses activated virtual environment
+venv\Scripts\activate
+
+poetry install # creates poetry.lock
+
+poetry add flask
+
+poetry add sqlalchemy
+
+poetry add flask-sqlalchemy psycopg2
+
+pip list # check if packages installed
+```
+
+* Setting up the postgres database which the Flask application will connect to
+
+```
+docker run --name postgres-flask -e POSTGRES_PASSWORD=postgres -d -p 5432:5432 postgres
+
+docker exec -it postgres-flask sh
+
+psql -U postgres
+
+create database parking;
+```
+
+* Created the following flask app
+
+```
+
+from flask import Flask, jsonify
+from flask_sqlalchemy import SQLAlchemy
+
+app = Flask(__name__)
+
+# Database configuration (update these values as needed)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:postgres@localhost:5432/parking'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# Define a Customer model
+class Customer(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), unique=True, nullable=False)
+
+# Create the database and table
+with app.app_context():
+    db.create_all()
+    
+    # Insert some records if table is empty
+    if Customer.query.count() == 0:
+        users = [
+            Customer(name='Alice', email='alice@example.com'),
+            Customer(name='Bob', email='bob@example.com'),
+            Customer(name='Charlie', email='charlie@example.com')
+        ]
+        db.session.add_all(users)
+        db.session.commit()
+
+@app.route("/", methods=['GET'])
+def get_home_page():
+    return "<h2>Hello to flask</h2>"
+
+@app.route('/customers', methods=['GET'])
+def get_users():
+    users = Customer.query.all()
+    return jsonify([{ 'id': user.id, 'name': user.name, 'email': user.email } for user in users])
+
+if __name__ == '__main__':
+    app.run(debug=True, port=4000, host ='0.0.0.0')
+
+### python app.py (within the virtual environment)
+```
+
+* Also bashed into the Postgres docker container to see if table had been created. Name of table is same as name of model class
+
+```
+docker exec -it postgres-flask sh
+
+psql -U postgres
+
+# List all databases
+\l 
+
+# Connect to database with name parking
+\c parking
+
+# List tables from current schema
+\dt
+
+#
+select * from customer; # 3 records were shown
+
+# Exit psql
+\q
+
+```
+
+* Sqlalchemy create_all does not update tables if they are already in the database. If you change a model’s columns, use a migration library like Alembic with Flask-Alembic or Flask-Migrate to generate migrations that update the database schema.
+
+* Flask SQLAlchemy is a popular ORM tool tailored for Flask applications.
+
+* 192.168.1.1 is the address of your router on your network, through which all your internet traffic goes through. Note that router has 2 IP, a public IP to connect to internet, a private IP to communicate with all devices on the same network. 192.168.1.1 is the private IP
+
+* Network Address Translation (NAT) enables devices within private IP networks to use the internet and cloud by translating (internal) private IP addresses to (external) public IP addresses and vice versa . It allows multiple devices to use the same public IP address and access the Internet and is typically done by a router.
+
+* Two devices on the same WiFi will be seen as having the same IP address externally (to check this connect your phone and laptop to same wifi and check Whats my IP on Google : 103.120.51.59). One of the ways computers on the same network get distinguished in communication with the same public server is by assigning them by the router different port numbers in the communication. Their public IP address is the same, but the port number part is not.
+
+* cURL is a CLI tool that allows you to request and transfer data over a URL using different protocols.
+
+* We can access host from within docker container by using host.docker.internal. Below I bash into an alpine container and from within the container curl the flask app running on port 4000 of my host system, which works successfully
+
+```
+
+docker run -it --rm alpine /bin/ash
+apk --no-cache add curl #alpine image doesn't come with curl.
+curl http://host.docker.internal:4000 # OUTPUT: <h2>Hello to flask</h2>
+
+```
+
+* Lot of errors installing psycopg2 within Docker container. Finally worked with ref 15 (had to install libpq-dev gcc)
+
+* When a Docker container uses the "host" network mode (--network=host), it doesn't get its own IP address because it shares the host machine's network namespace, meaning it essentially runs directly on the host's network stack
+
+```
+### src/app.py
+from flask import Flask, jsonify
+from flask_sqlalchemy import SQLAlchemy
+
+app = Flask(__name__)
+
+# Database configuration (update these values as needed)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:postgres@host.docker.internal:5432/parking'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# Define a User model
+class Customer(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), unique=True, nullable=False)
+
+# Create the database and table
+with app.app_context():
+    db.create_all()
+    
+    # Insert some records if table is empty
+    if Customer.query.count() == 0:
+        users = [
+            Customer(name='Alice', email='alice@example.com'),
+            Customer(name='Bob', email='bob@example.com'),
+            Customer(name='Charlie', email='charlie@example.com')
+        ]
+        db.session.add_all(users)
+        db.session.commit()
+
+@app.route("/", methods=['GET'])
+def get_home_page():
+    return "<h2>Hello to flask</h2>"
+
+@app.route('/customers', methods=['GET'])
+def get_users():
+    users = Customer.query.all()
+    return jsonify([{ 'id': user.id, 'name': user.name, 'email': user.email } for user in users])
+
+if __name__ == '__main__':
+    app.run(debug=True, port=4000, host ='0.0.0.0')
+
+### src/requirements.txt
+Flask==3.1.0
+Flask-JWT-Extended==4.7.1
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.40
+psycopg2==2.9.10
+
+### src/Dockerfile
+FROM python:3.11.5-slim-bookworm
+
+WORKDIR /flask-app
+
+# libpq-dev and gcc required for psycopg2 to work
+RUN apt-get update && \
+apt-get -y install libpq-dev gcc
+
+COPY app.py app.py 
+COPY requirements.txt requirements.txt
+
+RUN pip install -r requirements.txt
+
+CMD ["python", "app.py"]
+
+### docker build --no-cache --tag flask-postgres:1.0.0 .
+### docker run -p 4000:4000 flask-postgres:1.0.0
+
+```
+
+* To access the postgres database running on host from the Flask app running within the container, I had to put database connection string as `postgresql://postgres:postgres@host.docker.internal:5432/parking`
+
+* Note : Without the host ='0.0.0.0' in app.run(), the Flask app within the Docker container was not accessible, although everything else was the same
+
+* Tried a few other things 
+```
+docker run --network="host" -p 4000:4000 flask-postgres:1.0.0 # did not work
+docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 0179f405ae23
+docker run --add-host host.docker.internal:host-gateway -p 4000:4000 flask-postgres:1.0.0 # did not work
+```
+* Errors faced
+    * The current project's supported Python range (>3.8) is not compatible with some of the required packages Python requirement: flask requires Python >=3.9, so it will not be satisfied for Python >3.8,<3.9.Because no versions of flask match >3.1.0,<4.0.0 and flask (3.1.0) requires Python >=3.9, flask is forbidden.
+    * This error originates from the build backend, and is likely not a problem with poetry but one of the following issues with psycopg2 (2.9.10)
+    *  pg_config executable not found.pg_config is required to build psycopg2 from source.  Please add the directory containing pg_config to the $PATH or specify the full executable path with the option:
+    *  (psycopg2.OperationalError) connection to server at "localhost" (127.0.0.1), port 5432 failed: Connection refused. Is the server running on that host and accepting TCP/IP connections?connection to server at "localhost" (::1), port 5432 failed: Cannot assign requested address
+    * Port 4000 is in use by another program. Either identify and stop that program, or start the server with a different port : Reason : Docker registry was also running on same port
+
+
+```
+# Did not work (tried using poetry instead of pip within docker)
+FROM python:3.11.5-slim-bookworm
+
+ENV POETRY_VIRTUALENVS_CREATE=false
+
+RUN pip install poetry
+RUN apt install libpq-dev gcc
+
+WORKDIR /flask-app
+
+COPY app.py app.py 
+COPY pyproject.toml pyproject.toml
+
+RUN poetry install
+
+CMD ["python", "app.py"]
+```
+
+### Doubts
+1. Why do we maintain database migrations for a Django/Flask app? Is it because sqlalchemy cannot update existing tables?
+2. How do we connect a flask app inside Docker to a postgres database outside Docker? How do we connect a flask app inside Kubernetes to a postgres database outside Kubernetes? 
+3. What should be the database connection string when we connect from a flask app inside Docker or Kubernetes to a database outside Docker/Kubernetes?
+4. What's the difference between 127.0.0.1 and 0.0.0.0?
+5. What is 192.168.1.1 and how does it work?
+6. Do two computers connected on the same Wi-Fi have the same public IP address?
+
+### References
+1. https://stackoverflow.com/questions/42078080/add-nginx-conf-to-kubernetes-cluster
+2. https://stackoverflow.com/questions/57167104/how-to-use-local-docker-image-in-kubernetes-via-kubectl
+3. https://www.docker.com/blog/how-to-use-your-own-registry-2/
+4. https://stackoverflow.com/questions/7948494/whats-the-difference-between-a-module-and-package-in-python
+5. https://stackoverflow.com/questions/22256124/cannot-create-a-database-table-named-user-in-postgresql
+6. https://www.youtube.com/watch?v=Y0eAWkddEuM (Flask JWT and migrations)
+7. https://superuser.com/questions/801105/do-two-computers-connected-on-the-same-wi-fi-have-the-same-ip-address
+8. https://www.reddit.com/r/AskReddit/comments/ov38cj/what_is_19216811_and_how_does_it_work/
+9. https://superuser.com/questions/949428/whats-the-difference-between-127-0-0-1-and-0-0-0-0
+10. https://stackoverflow.com/questions/35689628/starting-a-shell-in-the-docker-alpine-container
+11. https://stackoverflow.com/questions/64300599/why-do-i-get-curl-not-found-inside-my-nodealpine-docker-container
+12. https://medium.com/@TimvanBaarsen/how-to-connect-to-the-docker-host-from-inside-a-docker-container-112b4c71bc66
+13. https://stackoverflow.com/questions/77727508/problem-installing-psycopg2-for-python-venv-through-poetry
+14. https://stackoverflow.com/questions/39985480/unable-to-use-sudo-commands-within-docker-bash-sudo-command-not-found-is-di
+15. https://wbarillon.medium.com/docker-python-image-with-psycopg2-installed-c10afa228016
+16. https://stackoverflow.com/questions/7023052/configure-flask-dev-server-to-be-visible-across-the-network
+17. https://stackoverflow.com/questions/39901311/docker-ubuntu-bash-ping-command-not-found
+
 ### Extras
 1. https://www.youtube.com/watch?v=RHwglGf_z40&t=1529s - Patroni
