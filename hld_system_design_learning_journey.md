@@ -429,7 +429,7 @@ listen http-proxy
 
 * Resolver : Resolvers section lists DNS nameservers that the load balancer will query when it needs to resolve a hostname to an IP address. A DNS nameserver is a specialized server within the Domain Name System (DNS) that translates human-readable domain names (like example.com) into IP addresses (like 192.0.2.1)
 
-* The key reason the haproxy config file with acl was not working on Day 4 was not because of any error in HAProxy, but it was because the routes were not defined in the Flask application. Once I added /web1 and /web2 routes to the Flask app, it started working as expected
+* **The key reason the haproxy config file with acl was not working on Day 4 was not because of any error in HAProxy, but it was because the routes were not defined in the Flask application. Once I added /web1 and /web2 routes to the Flask app, it started working as expected**
 
 ```
 ## haproxy/haproxy.cfg
@@ -588,6 +588,7 @@ listen http_proxy
 5. How and from where do the nameservers fetch the updated ip?
 6. What is ssl/tls?
 7. What if there is no server defined in listen proxy?
+8. What is 0.0.0.0 ip address?
 
 ### References
 1. https://stackoverflow.com/questions/30101075/haproxy-doesnt-start-can-not-bind-unix-socket-run-haproxy-admin-sock
@@ -602,5 +603,262 @@ listen http_proxy
 10. https://stackoverflow.com/questions/39209917/difference-between-frontend-backend-and-listen-in-haproxy
 11. https://www.haproxy.com/blog/failover-and-worst-case-management-with-haproxy
 
-### Extres
+
+## Day 6
+
+* Installed kind using Powershell, moved it into C:\kind and then added that location to path
+
+* Docker Desktop for Windows adds its own version of kubectl to PATH. If you have installed Docker Desktop before, you may need to place your PATH entry before the one added by the Docker Desktop installer or remove the Docker Desktop's kubectl.
+
+```
+curl.exe -Lo kind-windows-amd64.exe https://kind.sigs.k8s.io/dl/v0.27.0/kind-windows-amd64
+mkdir C:\kind
+Move-Item .\kind-windows-amd64.exe c:\kind\kind.exe
+```
+
+* kind uses containerd as a CRI implementation to deal with Pods (and hence - containers)
+
+* Container : Container is a packaged, self-contained unit of software
+
+* Pod : Pods are the smallest deployable units of computing that you can create and manage in Kubernetes. 
+
+* A pod within a node has:
+    * A local IP address.
+    * One or more Linux containers. For instance, Docker is commonly used as a container runtime.
+    * One or more volumes that are associated with these containers are persistent storage resources.
+
+* Node : Machine (physical or virtual) where your containerized applications (pods) reside and run. A node is a fundamental building block of a Kubernetes cluster
+
+* Control plane : Manages clusters and resources such as worker nodes and pods. 
+
+* Node is made up of 3 components : kubelet, a container runtime, and the kube-proxy. 
+
+* Control plane is made up of 5 components : kube-apiserver, kube-scheduler, kube-controller-manager, cloud-controller-manager, etcd (refer 11 for full architecture)
+
+* Kubeconfig : YAML files that configure Kubectl, the default Kubernetes client tool. It contains 3 important things:
+    * clusters: https end point to cluster
+    * context: cluster + user (use `kubectl config current-context`)
+    * users: to authenticate to a cluster
+
+* We can switch b/w different Kubernetes clusters using `kubectl config use-context <different-context>`
+
+* Deployment :  Deployment manages a set of Pods to run an application workload. It tells Kubernetes how to create or modify instances of the pods that hold a containerized application.
+
+* Service :  Service is a method for exposing a network application that is running as one or more Pods in your cluster. It basically enables external traffic exposure to cluster
+
+* ConfigMap: With it we store our environment variables in the cluster. 
+
+* Volume : Container's file system lives only as long as the Container does. So when a Container terminates and restarts, filesystem changes are lost. For more consistent storage that is independent of the Container, you can use a Volume. This is especially important for stateful applications, such as key-value stores (such as Redis) and databases.
+
+*  There are four types of service in Kubernetes.
+    * ClusterIP
+    * NodePort
+    * LoadBalancer
+    * ExternalName
+
+* There are 5 types of Kubernetes Volumes:
+    * Persistent Volumes
+    * Ephemeral Volumes
+    * EmptyDir Volumes
+    * Kubernetes hostPath Volumes
+    * Kubernetes Volumes ConfigMap
+
+* Docker vs K8:
+    * Docker is a container technology VS K8s is a management technology.
+    * Docker is about automated building VS K8s is about automated managing.
+    * Docker is a container runtime that packages applications into containers VS Kubernetes is a container orchestration platform that manages and scales those containers across a cluster of machines
+    
+* Docker Compose vs K8 : If you are networking containers within the same host go for docker compose VS If you are networking containers across multiple hosts go for kubernetes.
+
+* Hence if we want to run all our containers on a single machine, also know as **single node cluster**, Docker and Docker Compose is sufficient. Only 
+
+* In the Kubernetes cluster we don’t create containers, and we’ll create pods that are abstraction layer over containers. So, We only work with Pods. Generally we have one container per pod, only times that you have more than one container in a pod are time that your application needs some helper containers.
+
+```
+kind create cluster
+
+kubectl get nodes
+
+kubectl get pod -v6
+# C:\Users\dell\.kube\config
+
+```
+
+* kind was giving lot of errors so downloaded kubectl and enabled kubernetes within docker itself. This enabled the context docker-desktop which is much easier to use (followed That Devops Guy)
+
+```
+kubectl config get-contexts
+# Returned 2 contexts docker-desktop and kind-deployments, with current being kind-deployments
+
+kubectl config use-context docker-desktop
+# Change context to docker-desktop as kind-deplyments not working properly
+
+kubectl get pods
+# Output : No resources found in default namespace
+
+kubectl apply -f deployment.yaml
+
+kubectl get deploy
+# Output : example-deploy
+
+kubectl get pods
+# Output : example-deploy-67b49d65bc-jkj5f   2/2     Running   0          93s
+
+kubectl scale deployment example-deploy --replicas=1
+
+kubectl get pods
+# Output : example-deploy-67b49d65bc-jkj5f   1/1     Running   0          93s
+
+kubectl apply -f .\services\service.yaml
+
+kubectl get svc
+# Output : example-service   LoadBalancer   10.96.24.178   localhost     80:31022/TCP   115m
+# After creating service we can go to localhost to see flask app
+
+
+kubectl scale deployment example-deploy --replicas=0
+
+```
+*  Kubernetes doesn't support stop/pause of current state of pod and resume when needed. However, you can still achieve it by having no working deployments which is setting number of replicas to 0 (as done above in last line).
+
+* Files use to create the kubernetes cluster are as follows (note that we are using prebuilt docker image from docker hub aimvector/python:1.0.4)
+
+```
+
+# deployment.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-deploy
+  labels:
+    app: example-app
+    test: test
+  annotations:
+    fluxcd.io/tag.example-app: semver:~1.0
+    fluxcd.io/automated: 'true'
+spec: # specs about pod
+  selector:
+    matchLabels:
+      app: example-app
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: example-app
+    spec:
+      containers: # specs about container within the pod
+      - name: example-app
+        image: aimvector/python:1.0.4
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+      tolerations:
+      - key: "cattle.io/os"
+        value: "linux"
+        effect: "NoSchedule"      
+
+# services/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: example-service
+  labels:
+    app: example-app
+spec:
+  type: LoadBalancer
+  selector:
+    app: example-app
+  ports:
+    - protocol: TCP
+      name: http
+      port: 80
+      targetPort: 5000
+
+```
+* In deployment.yaml, we have specs of pod and within that specs of the container within the pod
+
+
+* Tried creating a flask container and using that within deployment.yaml, but it did not work
+
+```
+docker build --tag flask-kind:0.1.0 .
+
+docker run -p 5000:5000 flask-kind:0.1.0
+
+kind create cluster --name deployments --image kindest/node:v1.31.1
+
+kubectl apply -f deployment.yml
+
+kubectl get pods
+
+kubectl get nodes
+
+kubectl get deployments
+
+```
+
+* Make sure to separate config from code, keep flask code in src folder, kubernetes configs in kubernetes folder
+
+* Errors faced
+    * ERROR: no nodes found for cluster "kind" , on running `kind load docker-image flask-kind:0.1.0`. Reason: kind can't see or use docker images you've built or pulled in Docker For Desktop (refer 18)
+
+    * ERROR: failed to create cluster: could not find a log line that matches "Reached target .*Multi-User System.*|detected cgroup v1", on running `kind create cluster --image=flask-kind:0.1.0`
+
+    * Unable to connect to the server: dial tcp 127.0.0.1:52549: connectex: No connection could be made because the target machine actively refused it, on running `kubectl get pods` and `kubectl apply -f deployment.yaml` : Solution is `kubectl config use-context docker-desktop`
+
+    * Kubernetes service external ip pending
+
+
+### Doubts
+1. What is use of EXPOSE in Dockerfile? Especially when we already have port mapping (not much)
+2. Is port mapping done during docker build or docker run?
+3. What is diff bw pod and container in Kubernetes?
+4. Diff bw docker container and kubernetes container?
+5. Because we’re not supposed to pack multiple processes into a single container, we need a higher-level structure that will allow us to tie and wrap containers together and manage them as a single unit. This is the reasoning behind the pods. But why are we not supposed to pack multiple process in single container?
+6. Is Docker essentially Kubernetes on a single node?
+7. How to connect Flask app on a kubernetes pod to an external database in another network? (use type ExternalName)
+8. Are there any advantages of using "kind" instead of the integrated Kubernetes from Docker for learning purposes?
+9. Can we automatically restart unhealthy container in docker-compose?
+10. What is the kubectl equivalent commands to "minikube service <service name>"
+11. Kubernetes: create service vs expose deployment, what is difference?
+
+### References
+1. https://www.youtube.com/watch?v=kbeqNY0v0c4
+2. https://kind.sigs.k8s.io/docs/user/quick-start
+3. https://stackoverflow.com/questions/68172643/finding-the-kubeconfig-file-being-used
+4. https://www.quora.com/How-much-time-does-it-take-to-learn-Kubernetes-from-scratch-What-are-the-steps-to-follow-with-examples
+5. https://iximiuz.com/en/posts/kubernetes-kind-load-docker-image/
+6. https://dhavalgojiya.hashnode.dev/understanding-dockers-expose-keyword-4-port-mapping-scenarios-explained
+7. https://www.reddit.com/r/kubernetes/comments/196tgmv/basic_question_about_number_of_container_per_pod/
+8. https://www.baeldung.com/ops/kubernetes-pod-vs-container
+9. https://www.reddit.com/r/selfhosted/comments/13tcdps/docker_compose_or_kubernetes_for_single_node/
+10. https://www.armosec.io/glossary/kubernetes-control-plane/
+11. https://kubernetes.io/docs/concepts/architecture/
+12. https://spacelift.io/blog/kubeconfig
+13. https://stackoverflow.com/questions/50490808/unable-to-connect-to-the-server-dial-tcp-18080-connectex-no-connection-c
+14. https://www.youtube.com/watch?v=d1ZMnV4yM1U (That Devops Guy)
+15. https://discuss.kubernetes.io/t/connecting-to-an-external-mysql-database/8201
+16. https://medium.com/@ManagedKube/kubernetes-access-external-services-e4fd643e5097
+17. https://medium.com/@tech_with_mike/how-to-deploy-a-django-app-over-a-kubernetes-cluster-with-video-bc5c807d80e2
+18. https://www.reddit.com/r/kubernetes/comments/dc0qk4/are_there_any_advantages_of_using_kind_instead_of/
+19. https://stackoverflow.com/questions/38511459/kubernetes-node-vs-hosts-vs-cluster-terminology
+20. https://kubernetes.io/docs/tasks/configure-pod-container/configure-volume-storage/
+21. https://stackoverflow.com/questions/61628052/what-is-the-kubectl-equivalent-commands-to-minikube-service-service-name
+22. https://github.com/smriti111/django-postgresql-kubernetes
+23. https://stackoverflow.com/questions/54821044/how-to-stop-pause-a-pod-in-kubernetes
+
+### Extras
 1. https://www.youtube.com/watch?v=RHwglGf_z40&t=1529s - Patroni
