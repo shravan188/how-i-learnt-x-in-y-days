@@ -1197,6 +1197,8 @@ CMD ["python", "app.py"]
 4. What's the difference between 127.0.0.1 and 0.0.0.0?
 5. What is 192.168.1.1 and how does it work?
 6. Do two computers connected on the same Wi-Fi have the same public IP address?
+7. WHat exactly is th add-host flag in DOcker?
+8. How to copy folders to docker image from Dockerfile?
 
 ### References
 1. https://stackoverflow.com/questions/42078080/add-nginx-conf-to-kubernetes-cluster
@@ -1217,5 +1219,179 @@ CMD ["python", "app.py"]
 16. https://stackoverflow.com/questions/7023052/configure-flask-dev-server-to-be-visible-across-the-network
 17. https://stackoverflow.com/questions/39901311/docker-ubuntu-bash-ping-command-not-found
 
+
+## Day 8
+
+* Resources : Key Kubernetes resouces include:
+    * Deployment (kubectl get deploy)
+    * Pod (kubectl get pods)
+    * Service (kubectl get svc)
+    * Namespace
+    * Ingress
+    * StatefulSet
+    * ConfigMap
+
+* Cluster: A Kubernetes cluster consists of a control plane plus a set of worker machines, called nodes, that run containerized applications. Every cluster needs at least one worker node in order to run Pods.
+
+* Control Plane: Manages clusters and resources such as worker nodes and pods. The control plane receives information such as cluster activity, internal and external requests, and more. 
+
+* kubelet: Part of node. It ensures that Pods are running, including their containers (node consists of kubelet, container runtime and kube proxy)
+
+* kube-proxy : Maintains network rules on nodes to implement Services
+
+* Container runtime : Software that actually runs the containers i.e. the actual working code like flask or postgres (Kubernetes depreciated Docker as a container runtime after v1.20, using containerd instead) 
+
+* Containerd is the low-level container runtime that Docker is built upon
+
+* Namespace: Help divide or segment resources within a cluster
+    
+* Context:
+
+* Container : A container image is a ready-to-run software package containing everything needed to run an application: the code and any runtime it requires, application and system libraries, and default values for any essential settings
+
+* ConfigMap: Used to store environment variables, command line arguments and other non confidential data (like database name). To store confidential data, we use secrets
+
+* ReplicaSet: ReplicaSets allow you to tell Kubernetes to create multiple copies of the same Pod. This helps ensure the availability of applications because if one Pod fails for some reason (such as its host node crashing or being drained), other copies of the Pod remain available. Of course, if you ran just a single Pod instance, Kubernetes would try to restart the Pod in the event it failed. The major advantage of Kubernetes ReplicaSets is that you always have multiple Pod replicas running, so there is no downtime in Pod availability while you wait for Kubernetes to restart a failed Pod.
+
+* A Deployment provides declarative updates for Pods and ReplicaSets.For example when we set .spec.replicas as 3 in deployment, it creates a ReplicaSet that creates 3 replicated pods (refer 6)
+
+* Label: The set of pods that a service targets is defined with a label selector. Hence it is important to give  a pod a label, and in the service spec.selector, use the same label
+
+* While namespaces help group resources, labels are for more than just grouping. For a service to target a pod, it needs to have a label
+
+
+```
+docker run -d -p 4000:5000 --restart=always --name registry registry:2
+
+docker run --name postgres-flask-v2  -e POSTGRES_USER=pgusername -e POSTGRES_PASSWORD=pgpassword -d -p 5432:5432 postgres
+
+docker exec -it 587b229c42c7 sh
+
+psql -U pgusername
+
+create database demo_db;
+
+\c demo_db
+\dt
+select * from users;
+
+docker build . -t localhost:4000/my-flask-image-v2
+docker push localhost:4000/my-flask-image-v2
+
+```
+* Most tutorial push to a public Docker registry like Docker Hub, but I pushed it to my local Docker registry
+
+
+* Deployment file
+    * apiVersion : Which Kubernetes API we are using. While there are many apis available (refer 2), the most commonly used ones are:
+        * v1 : Typically used with kind service
+        * app/v1 : Typically used with kind deployment, stateful sets,
+    * kind : Defines the type of resource being created or modified such as Deployment, Service, ConfigMap, Ingress
+    * metadata: Contains essential information about the resource, such as its name, namespace, labels, and annotations
+        * name: Specifies the name of the resource, allowing it to be uniquely identified within its namespace
+        * labels: Enables categorization and grouping of resources based on key-value pairs.
+        * namespace: Which namespace resource belongs to
+    * spec: Describes the desired state of the resource. It outlines the configuration details and behavior of the resource
+        * replicas : Number of copies of the pod deployment will create
+        * selector.matchLabels : tells what pods the deployment will apply to.
+        * template : Is the PodTemplate i.e. details about the pod
+
+
+
+* The first metadata describes the deployment, 
+```
+### deployment.yaml
+
+apiVersion: "app/v1"
+kind: "Deployment"
+metadata: 
+    name: "flask"
+    namespace: "default"
+    labels:
+        app: "flask"
+spec:
+    replicas: 1
+    selector:
+        matchLabels: 
+            app: "flask"
+    template:
+        metadata:
+            labels:
+                app: "flask"
+        spec:
+            containers:
+                - name: "flask"
+                  image: "localhost:4000/my-flask-image-v2"
+                  imagePullPolicy: IfNotPresent
+                  ports:
+                  - containerPort: 3939 
+
+
+```
+
+* For containers, it is an array because we can theoretically have more than 1 container within a pod
+
+* Only Job, Deployment, Replica Set, and Daemon Set support matchLabels. For other resource types like Service, we target a label using just selector with a map. But they both mean the same thing (refer 8)
+
+* When you create a deployment, the Kubelet reads the PodSpec (a YAML that describes a Pod) and then instructs the container runtime using the CRI (Container Runtime Interface) to spin up containers to satisfy that spec. The container runtime pulls the image from the specified container registry and runs it. If you don’t specify a container registry hostname, Kubernetes will assume the image is in the Default Docker Registry. 
+
+* ImagePullPolicy : Lets you specify how you want the Kubelet to pull an image if there’s any change (restart, update, etc.) to a Pod. Options include:
+    * IfNotPresent : Kubernetes will only pull the image when it doesn’t already exist on the node
+    * Always : Kubernetes will always pull the latest version of the image from the container registry
+    * Never : there will be no attempts to pull the image
+
+* containerPort : containerPort as part of the pod definition is only informational purposes. If you actually want to expose a port as a service within the cluster or node then you have to create a service.
+
+```
+kubectl config get-contexts
+
+kubectl get pods
+
+kubectl apply -f deployment.yaml
+kubectl get pods
+kubectl logs flask-55d96d6986-qqv48
+
+# get all pods with the label of app as flask
+kubectl get pods -l app=flask
+kubectl get pods -l app=postgres
+
+```
+
+* To solve the external ip pending issue for the flask service, these are the things I tried
+    1. Added containerPort under container specs. Did not work
+    2. Deleted another service which was having the external ip as localhost : `kubectl delete service example-service`, then retried deploying. Did not work
+    3. Changed type for `flask-service` from LoadBalancer to NodePort and back to LoadBalancer. After doing this, somehow the external ip was assigned as localhost
+
+
+* Errors:
+    * sqlalchemy.exc.NoSuchModuleError: Can't load plugin: sqlalchemy.dialects:postgres. Reason: The URI should start with postgresql:// instead of postgres://. SQLAlchemy used to accept both, but has removed support for the postgres name.
+
+    * sqlalchemy.exc.OperationalError: (psycopg2.OperationalError) could not translate host name "postgres" to address: No such host is known. Reason : In `SQLALCHEMY_DATABASE_URI = 'postgresql://pgusername:pgpassword@postgres:5432/demo_db'`, sqlalchemy could not figure out what postgres:5432 is hence changed to localhost:5432
+
+    * Kubernetes service external ip pending
+
+### Doubts
+1. What is a context in Kubernetes?
+2. What is the difference between Kubernetes cluster and namespaces?
+3. Why do we need a selector within kind:Deployment, since deployment will already know which pod to target/deploy?
+4. What is the difference bw pod and container?(refer Veeramalla)
+5. How to use kubectl create secret?
+
+### References
+1. https://stackoverflow.com/questions/42078080/add-nginx-conf-to-kubernetes-cluster
+2. https://matthewpalmer.net/kubernetes-app-developer/articles/kubernetes-apiversion-definition-guide.html
+3. https://kubernetes.io/docs/concepts/architecture/
+4. https://www.linkedin.com/pulse/understanding-kubernetes-yaml-files-exploring-kind-spec-anantharamu
+5. https://www.groundcover.com/blog/kubernetes-replicaset
+6. https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+7. https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
+8. https://medium.com/@zwhitchcox/matchlabels-labels-and-selectors-explained-in-detail-for-beginners-d421bdd05362
+9. https://spacelift.io/blog/kubernetes-imagepullpolicy
+10. https://stackoverflow.com/questions/55741170/container-port-pods-vs-container-port-service
+11. https://spacelift.io/blog/kubernetes-deployment-yaml
+12. https://medium.com/@mudasiryounas/kubernetes-docker-flask-postgres-sqlalchemy-gunicorn-deploy-your-flask-application-on-57431c8cbd9f
+13. https://github.com/mudasiryounas/kubernetes-docker-flask-postgres-sqlalchemy-gunicorn-tutorial/tree/master
+
 ### Extras
 1. https://www.youtube.com/watch?v=RHwglGf_z40&t=1529s - Patroni
+2. https://www.youtube.com/watch?v=fvpq4jqtuZ8 - Connecting to database outside Kubernetes
