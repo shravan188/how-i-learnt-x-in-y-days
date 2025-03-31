@@ -1281,8 +1281,9 @@ docker push localhost:4000/my-flask-image-v2
 ```
 * Most tutorial push to a public Docker registry like Docker Hub, but I pushed it to my local Docker registry
 
+* Manifest file : A YAML or JSON file that describes the desired state of a Kubernetes object (eg. deployment.yaml)
 
-* Deployment file
+* Manifest file (deployment.yaml)
     * apiVersion : Which Kubernetes API we are using. While there are many apis available (refer 2), the most commonly used ones are:
         * v1 : Typically used with kind service
         * app/v1 : Typically used with kind deployment, stateful sets,
@@ -1326,6 +1327,25 @@ spec:
                   ports:
                   - containerPort: 3939 
 
+---
+
+apiVersion: "v1"
+kind: Service
+metadata:
+    name: "flask-service"
+    namespace: "default"
+    labels:
+        app: "flask"
+spec:
+    ports:
+    - protocol: "TCP"
+      port: 80
+      targetPort: 3939
+    selector: 
+      app:"flask"
+
+    type: "LoadBalancer"
+
 
 ```
 
@@ -1342,6 +1362,24 @@ spec:
 
 * containerPort : containerPort as part of the pod definition is only informational purposes. If you actually want to expose a port as a service within the cluster or node then you have to create a service.
 
+*  Pods are designed as relatively ephemeral (last for short duration), disposable entities, so they can be and often are, changed or replaced
+
+* Since pods keep on changing, their IP address also keeps on changing. Hence we use services to reach the pods (hence important every pod have labels)
+
+* Service : Helps clients reach pods that can fulfill their request, without client having to worry about pods dynamic ip address (the service can be reached at the same place at any point in time, and hence is a stable destination for client to access pod)
+
+
+* Kubernetes supports five main service types:
+    * ClusterIP : Exposes the service on a cluster-internal IP. Used for Pod-to-Pod communication within the same cluster
+    * NodePort : provides a way to expose your application to external clients. We can choose a port but it must be in the range of 30000 to 32767
+    * LoadBalancer
+    * ExternalName and Headless
+
+
+* On doing `kubectl describe service <service-name>`, the LoadBalancer Ingress gives the external ip of the service (assuming the service is of the right type)
+
+* Istio : Ingress controller
+
 ```
 kubectl config get-contexts
 
@@ -1349,11 +1387,17 @@ kubectl get pods
 
 kubectl apply -f deployment.yaml
 kubectl get pods
+
+# get the logs
 kubectl logs flask-55d96d6986-qqv48
 
 # get all pods with the label of app as flask
 kubectl get pods -l app=flask
 kubectl get pods -l app=postgres
+
+kubectl get pod
+
+kubectl describe 
 
 ```
 
@@ -1362,6 +1406,68 @@ kubectl get pods -l app=postgres
     2. Deleted another service which was having the external ip as localhost : `kubectl delete service example-service`, then retried deploying. Did not work
     3. Changed type for `flask-service` from LoadBalancer to NodePort and back to LoadBalancer. After doing this, somehow the external ip was assigned as localhost
 
+* "CrashLoopBackOff" status : Indicates a pod is stuck in a restart loop because a container within it fails to start successfully and is repeatedly restarted.
+
+* cURL is mainly used for making HTTP request. It can make an HTTP request to an HTTP server and it can get an HTTP response from an HTTP server. **cURL can't communicate with a database**. It can communicate with an HTTP server that runs a server side program (which could be written in PHP) which gets data from a database, formats it in an HTTP response and sends that.
+
+* Package index files : Contain information about the packages a package repository provides. APT stores them in /var/lib/apt/lists
+
+* APT (Advanced package tool) : A command-line utility used for managing software packages on Debian-based systems like Ubuntu and Debian
+
+* Reason for using `apt-get update` : To refresh the package index files on a Linux system, so that system has the latest information about available software packages and their versions. Run this before using `apt-get install`. Not doing so might throw error - `Unable to locate package` (faced this when trying to install ping)
+
+* I wanted to bash into a Kubernetes pod and then try pinging the other pods and services, so this is how I did it (based on second answer of ref 26 and 29)
+
+```
+# to get pods internal ip
+kubectl get pods -o wide
+
+kubectl get pods
+
+kubectl get service
+# OUTPUT : 
+# flask-service   LoadBalancer   10.109.19.11    localhost     80:32708/TCP   20h
+# postgres        ClusterIP      10.104.70.127   <none>        5432/TCP       20h
+
+## kubectl exec -it flask-574c865cc-ljxm4 -n default sh
+kubectl exec -it <pod-name> -- sh
+
+# Install curl as it is not present by default
+apt-get update
+apt-get install curl
+
+curl flask-service # OUTPUT : Hello World! I am from docker!
+exit
+
+## Bash into postgres pod
+kubectl exec -it postgres-55944994d8-5qk8x -- sh
+
+# Get linux os used
+cat /etc/*-release
+
+# Install curl and ping
+apt-get update
+apt-get install curl
+apt-get install iputils-ping
+
+# Tried pinging postgres service but failed
+ping postgres
+# OUTPUT 
+# PING postgres.default.svc.cluster.local (10.104.70.127) 56(84) bytes of data
+# 15 packets transmitted, 0 received, 100% packet loss, time 14589ms
+
+# Ping other pods within cluster
+# To get cluster ip address, in another terminal type kubectl get pods -o wide
+ping 10.1.0.35 # ping was succeeful
+
+```
+
+* URL of service is in the below format: `<service-name>.<namespace>.svc.cluster.local:<service-port>`. In the above case postgres.default.svc.cluster.local. But note that if both services are in same namespace then just use service name, rest can be ignored. Note that at the end of the day, this URL is just an IP address
+
+* As mentioned in previous point, Kubernetes creates DNS records for Services and Pods. You can contact Services with consistent DNS names instead of IP addresses.(refer 28)
+
+* In the SQLAlchemy string `postgresql://pgusername:pgpassword@postgres:5432/demo_db`, the postgres refers to the postgres service in deployment.yaml. Since we are in the same namespace, we can access the postgres service by just typing postgres (instead of postgres.default.svc.cluster.local)
+
 
 * Errors:
     * sqlalchemy.exc.NoSuchModuleError: Can't load plugin: sqlalchemy.dialects:postgres. Reason: The URI should start with postgresql:// instead of postgres://. SQLAlchemy used to accept both, but has removed support for the postgres name.
@@ -1369,6 +1475,9 @@ kubectl get pods -l app=postgres
     * sqlalchemy.exc.OperationalError: (psycopg2.OperationalError) could not translate host name "postgres" to address: No such host is known. Reason : In `SQLALCHEMY_DATABASE_URI = 'postgresql://pgusername:pgpassword@postgres:5432/demo_db'`, sqlalchemy could not figure out what postgres:5432 is hence changed to localhost:5432
 
     * Kubernetes service external ip pending
+    * kubectl exec [POD] [COMMAND] is DEPRECATED and will be removed in a future version. Use kubectl exec [POD] -- [COMMAND] instead.
+    * Unable to locate package curl : Solution : First run `apt-get update`, then `apt get install curl`
+    * Package 'ping' has no installation candidate : Solution : `apt-get update` followed by `apt-get install iputils-ping`
 
 ### Doubts
 1. What is a context in Kubernetes?
@@ -1376,6 +1485,12 @@ kubectl get pods -l app=postgres
 3. Why do we need a selector within kind:Deployment, since deployment will already know which pod to target/deploy?
 4. What is the difference bw pod and container?(refer Veeramalla)
 5. How to use kubectl create secret?
+6. WHat is the advantage of having the deployments in multiple file vs everything in 1 file?
+7. Does the ip address of pod keep on changing kubernetes? How about node ip address?
+8. How to know which cluster a service belongs to?
+9. What is difference bw NodePort, LoadBalancer and Ingress?
+10. I tried bashing into a Kubernetes pod and then trying to ping a service, but it did not work. Why?
+11. How to make 2 Kubernetes services talk to each other? For example, I have a Flask app running on 1 node, how do I connect to the Postgres service using sqlalchemy?
 
 ### References
 1. https://stackoverflow.com/questions/42078080/add-nginx-conf-to-kubernetes-cluster
@@ -1391,7 +1506,25 @@ kubectl get pods -l app=postgres
 11. https://spacelift.io/blog/kubernetes-deployment-yaml
 12. https://medium.com/@mudasiryounas/kubernetes-docker-flask-postgres-sqlalchemy-gunicorn-deploy-your-flask-application-on-57431c8cbd9f
 13. https://github.com/mudasiryounas/kubernetes-docker-flask-postgres-sqlalchemy-gunicorn-tutorial/tree/master
+14. https://fahadahammed.medium.com/comparing-kubernetes-manifest-application-methods-single-file-vs-multiple-files-1e460fb0f393
+15. https://stackoverflow.com/questions/64227258/all-in-one-file-kubernetes-manifest-and-one-file-per-resource-kubernetes-file
+16. https://stackoverflow.com/questions/52362514/when-will-the-kubernetes-pod-ip-change
+17. https://kodekloud.com/blog/clusterip-nodeport-loadbalancer/
+18. https://stackoverflow.com/questions/44021319/what-is-the-best-way-to-transfer-data-from-database-using-curl
+19. https://medium.com/@danielepolencic/learn-why-you-cant-ping-a-kubernetes-service-dec88b55e1a3
+20. https://askubuntu.com/questions/216287/unable-to-install-files-with-apt-get-unable-to-locate-package
+21. https://askubuntu.com/questions/550393/what-is-a-package-index-file
+22. https://askubuntu.com/questions/216287/unable-to-install-files-with-apt-get-unable-to-locate-package
+23. https://superuser.com/questions/718916/problems-installing-ping-in-docker
+24. https://stackoverflow.com/questions/30746888/how-to-know-a-pods-own-ip-address-from-inside-a-container-in-the-pod
+25. https://stackoverflow.com/questions/26988262/best-way-to-find-the-os-name-and-version-on-a-unix-linux-platform
+26. https://stackoverflow.com/questions/59558303/how-to-find-the-url-of-a-service-in-kubernetes
+27. https://kubernetes.io/docs/tasks/debug/debug-application/get-shell-running-container/
+28. https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/
+29. https://stackoverflow.com/questions/45720084/how-to-make-two-kubernetes-services-talk-to-each-other
+30. https://www.digitalocean.com/community/tutorials/how-to-inspect-kubernetes-networking
 
 ### Extras
 1. https://www.youtube.com/watch?v=RHwglGf_z40&t=1529s - Patroni
 2. https://www.youtube.com/watch?v=fvpq4jqtuZ8 - Connecting to database outside Kubernetes
+3. Check out Signoz 
