@@ -1524,7 +1524,744 @@ ping 10.1.0.35 # ping was succeeful
 29. https://stackoverflow.com/questions/45720084/how-to-make-two-kubernetes-services-talk-to-each-other
 30. https://www.digitalocean.com/community/tutorials/how-to-inspect-kubernetes-networking
 
+
+## Day 9
+
+
+* The ingress-nginx version that we download should match the Kubernetes version. Kubernetes version can be obtained using `kubectl version --short`, and get number corresponding to server version
+
+* From ref 3, we know Ingress-nginx v1.9.5 is compatible with Kubernetes v1.25.4
+
+* When you delete a Kubernetes namespace, all resources within that namespace are also deleted. 
+
+* Built a simple nginx ingress using ref 4
+
+```
+kubectl version --short
+# OUTPUT
+# Client Version: v1.25.4
+# Kustomize Version: v4.5.7
+# Server Version: v1.25.4
+
+
+kubectl create namespace ingress-nginx
+
+kubectl get namespaces
+
+# Deploy ingress nginx
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.9.5/deploy/static/provider/cloud/deploy.yaml
+
+
+kubectl get all -n ingress-nginx
+
+kubectl get pods -n ingress-nginx
+# Must show 1 running pod : ingress-nginx-controller-xxxx
+
+# Use curl (or alternatively go from browser)
+curl https://localhost/ 
+
+kubectl -n ingress-nginx get svc
+
+## Deleted many other services in between
+kubectl get namespaces
+
+kubectl apply -f service-a.yaml
+kubectl apply -f service-b.yaml
+
+kubectl port-forward svc/service-a 80
+
+kubectl apply -f routing-by-path.yaml
+
+kubectl get svc -n ingress-nginx
+# ingress-nginx-controller LoadBalancer   10.98.104.70     localhost     80:30363/TCP,443:32604/TCP   175m
+# ingress-nginx-controller-admission   ClusterIP      10.108.122.244   <none>   443/TCP   175m
+
+
+# Went to following urls in browser
+# 127.0.0.1 => "/" on service-a
+# http://127.0.0.1/path-a.html => "/path-a.html" on service-a
+# http://127.0.0.1/path-b.html => "/path-b.html" on service-a
+# http://127.0.0.1/path-b => "/" on service-b
+# http://127.0.0.1/path-b/path-b.html => "/path-b.html" on service-b
+
+```
+
+* Initially routing-by-path was not working as expected. Then removed the host (spec.rules.host) and post that it started working as expected (got idea from ref 7)
+
+```
+#### routing-by-path.yaml
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: service-a
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: service-a
+            port:
+              number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: service-b
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /path-b(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: service-b
+            port:
+              number: 80
+---
+
+#### service-a.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: service-a
+data:
+  path-a.html: |
+    "/path-a.html" on service-a
+  path-b.html: |
+    "/path-b.html" on service-a
+  index.html: |
+    "/" on service-a  
+  404.html: |
+    service-a 404 page
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: service-a-nginx.conf
+data:
+  nginx.conf: |
+    user  nginx;
+    worker_processes  1;
+    error_log  /var/log/nginx/error.log warn;
+    pid        /var/run/nginx.pid;
+    events {
+        worker_connections  1024;
+    }
+
+    http {
+        sendfile        on;
+        server {
+          listen       80;
+          server_name  localhost;
+
+          location / {
+              root   /usr/share/nginx/html;
+              index  index.html index.htm;
+          }
+
+          error_page 404 /404.html;
+          error_page   500 502 503 504  /50x.html;
+          location = /50x.html {
+              root   /usr/share/nginx/html;
+          }
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-a
+  labels:
+    app: service-a
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: service-a
+  template:
+    metadata:
+      labels:
+        app: service-a
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: html
+          mountPath: "/usr/share/nginx/html/"
+        - name: config
+          mountPath: "/etc/nginx/"
+      volumes:
+      - name: html
+        configMap:
+          name: service-a
+      - name: config
+        configMap:
+          name: service-a-nginx.conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-a
+spec:
+  selector:
+    app: service-a
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+
+
+#### service-b.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: service-b
+data:
+  path-a.html: |
+    "/path-a.html" on service-b
+  path-b.html: |
+    "/path-b.html" on service-b
+  index.html: |
+    "/" on service-b  
+  404.html: |
+    service-b 404 page
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: service-b-nginx.conf
+data:
+  nginx.conf: |
+    user  nginx;
+    worker_processes  1;
+    error_log  /var/log/nginx/error.log warn;
+    pid        /var/run/nginx.pid;
+    events {
+        worker_connections  1024;
+    }
+
+    http {
+        sendfile        on;
+        server {
+          listen       80;
+          server_name  localhost;
+
+          location / {
+              root   /usr/share/nginx/html;
+              index  index.html index.htm;
+          }
+
+          error_page 404 /404.html;
+          error_page   500 502 503 504  /50x.html;
+          location = /50x.html {
+              root   /usr/share/nginx/html;
+          }
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-b
+  labels:
+    app: service-b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: service-b
+  template:
+    metadata:
+      labels:
+        app: service-b
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: html
+          mountPath: "/usr/share/nginx/html/"
+        - name: config
+          mountPath: "/etc/nginx/"
+      volumes:
+      - name: html
+        configMap:
+          name: service-b
+      - name: config
+        configMap:
+          name: service-b-nginx.conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-b
+spec:
+  selector:
+    app: service-b
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+
+```
+
+
+* Warning : path /path-b(/|$)(.*) cannot be used with pathType Prefix
+
+
+### Doubts
+1. When we delete namespace do all resources get deleted?
+2. What is a port forward using kubectl?
+
+### References
+1. https://stackoverflow.com/questions/65193758/enable-ingress-controller-on-docker-desktop-with-wls2
+2. https://stackoverflow.com/questions/61616203/nginx-ingress-controller-failed-calling-webhook
+3. https://github.com/kubernetes/ingress-nginx/tree/main
+4. https://github.com/marcel-dempers/docker-development-youtube-series/tree/master/kubernetes/ingress/controller/nginx
+5. https://www.youtube.com/watch?v=72zYxSxifpM (That Devops Guy)
+6. https://stackoverflow.com/questions/38230452/what-is-command-to-find-detailed-information-about-kubernetes-masters-using-ku
+7. https://github.com/ankur6ue/Flask_Ingress/blob/main/ingress.yaml
+8. https://www.telesens.co/2021/05/14/accessing-a-custom-flask-microservice-from-a-kubernetes-ingress-controller/
+
+
+## Day 10
+
+* Learnt about Flask and caching
+
+* Extensions are extra packages that add functionality to a Flask application
+
+* Deserialization is the process whereby a lower-level format (such as a series of bytes or a string that has been transferred over a network, or stored in a data store) is translated into a readable object or other data structure. In JavaScript, for example, you can deserialize a JSON string to an object by calling the function JSON
+
+* Marshmallow is useful because it deserializes the json objects passed to your REST API, and raises consistent 400 error messages when the user violates the API. Like Pydantic, it also helps validate data
+
+* Migrations are meant to keep the database in sync with the Models. Migrations also allow you to change your database in a controlled way: Any change you make to your database will be represented in a migration and may be "played back" on a different machine, thus making it easy to version track the database. This is also important because database must be persistent. When you add a new field, old the existing data must not get erased
+
+* __name__ is a variable that exists in every Python module, and is set to the name of the module
+
+* Scripts vs Module : A script is a Python file that's intended to be run directly. When you run it, it should do something. A module is a Python file that's intended to be imported into scripts or other modules.
+
+* A slug is an alternative to a name that would otherwise not be acceptable for various reasons - e.g. containing special characters, too long, mixed-case, etc. - appropriate for the target usage
+```
+{
+   "title": "Hello World",
+   "slug": "hello_world"
+}
+
+```
+
+* In Declarative mapping (Declarative ORM), we use classes to define database tables. In Imperative Mapping (Classical ORM) we define the class separately from the table mapping., and use Table objects explicitly. We mostly use Declarative mapping
+
+* The documentation of sqlalghemy is really bad (from a Youtube comment)
+
+* There are 3 types of relationships possible bw 2 tables:
+  * 1 to 1
+  * 1 to many
+  * many to many
+
+
+* back_populates defines how two related models reference each other within the Python code. **It does not enforce referential integrity at the database level** Instead it allows SQLAlchemy to maintain in-memory synchronization between two related objects at the ORM level (not at database level)
+
+```
+class Parent(Base):
+    __tablename__ = 'parent'
+    id = Column(Integer, primary_key=True)
+    children = relationship("Child", back_populates="parent")
+
+class Child(Base):
+    __tablename__ = 'child'
+    id = Column(Integer, primary_key=True)
+    parent_id = Column(Integer, ForeignKey('parent.id'))
+    parent = relationship("Parent", back_populates="children")
+
+parent = Parent()
+child = Child()
+child.parent = parent
+print(parent.children)
+# OUTPUT : [Child(...)]. Without back_populate this would have been empty
+
+```
+* Note : Mapped classes give you the ability to work with tables as if they are objects in memory; along the same lines, relationships give you the ability to work with foreign keys as if they are references in memory.
+
+* Model vs Schema : 
+  * Models interact with the database, while Schemas format and validate API data. 
+  * Models are used for storing & querying data in a database, whereas Schemas help validate input data from the user
+
+* Marshmallow in Python is like Zod in Typescript. Both are schema validation libraries
+
+* Flask-Restful, an extension for Flask that simplifies building RESTful APIs. Its advantages are: it provides a Resource class that allows you to define HTTP methods (GET, POST, PUT, DELETE) as class methods, making it easier to organize and manage your API endpoints
+
+* While converting from flask to flask-restful, classes are formed on basis of which endpoint they are using, same endppoint (for example /hello) would result in same class
+
+```
+### Using flask
+from flask import Flask, jsonify
+
+app = Flask(__name__)
+
+@app.route('/hello', methods=['GET'])
+def hello():
+    return jsonify({"message": "Hello, World!"})
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+### Using flask-restful
+
+from flask import Flask, jsonify
+from flask_restful import Api, Resource
+
+app = Flask(__name__)
+api = Api(app)
+
+class HelloWorld(Resource):
+    def get(self):
+        return {"message": "Hello, World!"}
+
+api.add_resource(HelloWorld, "/hello")
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+##### For a full fledged CRUD example with create, update and delete, check out Chatgpt
+
+```
+
+* One reason for using Flask over FastAPI is Flask maintainers are really good, better compared to FastAPI maintainers (https://www.reddit.com/r/Python/comments/1g83rjr/why_people_still_using_flask_after_fastapi_release/)
+
+* The folder structure for the project is as follows
+
+```
+|   app.py
+|   config.py
+|   extensions.py
+|   poetry.lock
+|   pyproject.toml
+|   roles.sql
+|   users.sql
+|
++---api
+|   |   views.py
+|   |   __init__.py
+|   |
+|   +---resources
+|   |   |   user.py
+|   |   |   __init__.py
+|   |
+|   +---schemas
+|   |   |   user.py
+|   |   |   __init__.py
+|   |
++---migrations
++---models
+|   |   users.py
+|   |   __init__.py
+|   |
++---instance
+|       db.sqlite3
+
+
+```
+
+
+* The Flask code is as belows
+
+```
+### extensions.py
+from flask_marshmallow import Marshmallow
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from flask_caching import Cache
+
+db = SQLAlchemy()
+migrate = Migrate
+ma = Marshmallow()
+cache = Cache()
+
+### config.py
+import os
+FLASK_RUN_HOST = os.environ.get("FLASK_RUN_HOST","0.0.0.0")
+FLASK_RUN_PORT = os.environ.get("FLASK_RUN_PORT", 9000)
+SQLALCHEMY_DATABASE_URI = "sqlite:///db.sqlite3"
+CACHE_TYPE = "RedisCache"
+
+### app.py
+from flask import Flask
+from extensions import db, cache
+from api.views import register_routes  # Import function to register API routes
+
+app = Flask(__name__)
+app.config.from_object("config")
+register_routes(app)
+db.init_app(app)
+cache.init_app(app)
+
+if __name__ == '__main__':
+    app.run(
+        host=app.config.get("FLASK_RUN_HOST"),
+        port=app.config.get("FLASK_RUN_PORT"),
+        debug=True
+    )
+
+
+### models/users.py
+from extensions import db
+
+class User(db.Model):
+    __tablename__ = "users"
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String, nullable=False)
+    email = db.Column(db.String, nullable=False)
+    age = db.Column(db.Integer, nullable=False)
+    # define a many-to-many relationship between User table and Role table, using an association table named "user_role"
+    # By using back_pupulates, when we assign a role to user using user.roles = role, when we print(role.users), 
+    # we will get all users with that role instead of an empty list
+    roles = db.relationship("Role", secondary="user_role", back_populates="users")
+
+class Role(db.Model):
+    __tablename__ = "roles"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(30), nullable=False)
+    slug = db.Column(db.String(30), nullable=False, unique=True)
+
+    users = db.relationship("User", secondary="user_role", back_populates="roles")
+
+class UserRole(db.Model):
+    __tablename__ = "user_role"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    role_id = db.Column(db.Integer, db.ForeignKey("roles.id"), primary_key=True)
+
+### api/views.py
+from flask import Blueprint, jsonify
+from flask_restful import Api
+from marshmallow import ValidationError
+from api.resources.user import UserList, UserResource, RoleList, HomePage
+
+def register_routes(app):
+    api = Api(app)
+    api.add_resource(HomePage, "/")
+    api.add_resource(UserList, "/users")
+    api.add_resource(UserResource, "/users/<int:user_id>")
+    api.add_resource(RoleList, "/roles")
+
+
+### api/resources/user.py
+
+from flask import request
+from flask_restful import Resource
+from api.schemas.user import UserSchema, RoleSchema
+from extensions import db, cache
+from models.users import User, Role
+
+class HomePage(Resource):
+    def get(self):
+        return "Welcome to homepage"
+
+class UserList(Resource):
+    def get(self):
+        users = User.query.all()
+        schema = UserSchema(many=True)
+        return {"results": schema.dump(users)}
+
+    def post(self):
+        schema = UserSchema()
+        user = schema.load(request.json)
+        db.session.add(user)
+        db.session.commit()
+
+        return {"msg": "User created", "user": schema.dump(user)}
+
+
+class UserResource(Resource):
+    def get(self, user_id):
+        user = cache.get(f"user_id_{user_id}")
+        if user is None:
+            user = User.query.get_or_404(user_id)
+            cache.set(f"user_id_{user_id}", user)
+        schema = UserSchema()
+
+        return {"user": schema.dump(user)}
+
+    def put(self, user_id):
+        schema = UserSchema(partial=True)
+        user = User.query.get_or_404(user_id)
+        user = schema.load(request.json, instance=user)
+
+        db.session.add(user)
+        db.session.commit()
+
+        return {"msg": "User updated", "user": schema.dump(user)}
+
+    def delete(self, user_id):
+        user = User.query.get_or_404(user_id)
+
+        db.session.delete(user)
+        db.session.commit()
+
+        return {"msg": "User deleted"}
+
+
+class RoleList(Resource):
+    @cache.cached(60)
+    def get(self):
+        roles = Role.query.all()
+        schema = RoleSchema(many=True)
+        return {"results":schema.dump(roles)}
+
+
+### api/schemas/user.py
+from marshmallow import validate, validates_schema, ValidationError
+from marshmallow.fields import String
+from extensions import ma
+from models.users import User, Role
+
+class UserSchema(ma.SQLAlchemyAutoSchema):
+    name = String(required=True, validate=[validate.Length(min=3)], error_messages={
+        "required": "The name is required",
+        "invalid": "The name is invalid and needs to be a string",
+    })
+    email = String(required=True, validate=[validate.Email()])
+
+    @validates_schema
+    def validate_email(self, data, **kwargs):
+        email = data.get("email")
+
+        if User.query.filter_by(email=email).count():
+            raise ValidationError(f"Email {email} already exists.")
+
+    class Meta:
+        model = User
+        load_instance = True
+        exclude = ["id"]
+
+
+class RoleSchema(ma.SQLAlchemyAutoSchema):
+    class Meta:
+        model = Role
+
+```
+* Created the database and seeded some data using the following commands
+
+```
+### creating the database in the command prompt
+flask shell
+from app import db
+from models.users import User
+from models.users import Role
+from models.users import UserRole
+db.create_all()
+
+### seeding the database (fillinf/populating it with some data)
+sql = open("users.sql", "r")
+statement = sql.read()
+from sqlalchemy import text
+db.session.execute(text(statement))
+db.session.commit()
+
+```
+
+* The SQL used for seeding the tables are as follows
+```
+INSERT INTO roles (name, slug)
+VALUES 
+    ("Admin", "admin"),
+    ("Account Manager", "account_manager"),
+    ("Regional Manager", "regional_manager")
+
+INSERT INTO users (name, email, age)
+VALUES
+    ('John Doe', 'john@google.com',  25),
+    ('Jane Smith',  'jane@msn.com',  30),
+    ('Bob Johnson',  'bob@hotmail.com',  40),
+    ('Jack Edwards',  'jak@gmail.com',  40),
+    ('Julie Banks',  'julie@gmail.com',  40)
+
+
+```
+
+* Since we cache the data for roles, if we insert a new role and then try to retrive all roles we will not the get the latest data.
+
+* We can check the data within redis using the following redis cli commands
+```
+#### Important redis cli commands
+
+# activate redis cli
+redis-cli
+
+# see all keys present
+keys *
+
+# get value corresponding to key (get <key-name>)
+GET flask_cache_view//roles
+
+# delete a key
+DEL flask_cache_view//roles
+
+# set <key-name> <key-value> to set a value eg. set age 26
+
+# check if key exists, 0 means no longer present
+EXISTS flask_cache_view//roles
+
+# Check time to live, -1 means key will never expire, we can make it expire using EXPIRE
+TTL flask_cache_view//roles
+
+```
+* Time to Live (TTL) : You can control the freshness of your cached data by applying a time to live (TTL) or expiration to your cached keys. After the set time has passed, the key is deleted from the cache, and access to the origin data store is required along with reaching the updated data. In our case, we have put `@cache.cached(60)` so it will expire after 60 seconds
+
+* Errors:
+  * TypeError: models.users.User() argument after ** must be a mapping, not User
+
+### Doubts
+1. Why do we need to store database migrations?
+2. What is the difference bw Python script and Python module?
+3. Why do we pass __name__ to the Flask class?
+4. What us the difference bw Declarative and Imperative style mentioned in SQLAlchemy docs?
+5. When do we use back populate in SQLAlchemy?
+6. How to avoid circular dependency issues with backpopulate?
+7. Instead defining a foreign key sufficient, just like we do at the database level? Why the whole need for relationship?
+8. Is Marshmallow a simple way of doing jsonify?
+9. What is the difference bw schema and model in Flask?
+10. Is there a way to test a SQLAlchemy connection?
+11. What are Flask blueprints?
+12. How to prevent caching in Flask?
+13. Can we cache a webpage in redis?
+14. How do we force refresh of cache, so that it reflects latest data?
+15. What are use cases for data structures like list and set in Redis? What is redis expiration algorithm?
+
+### References
+1. https://www.reddit.com/r/flask/comments/zkf9kn/why_use_marshmallow_with_rest_api_and_orm/
+2. https://github.com/demoskp/flask-caching-tutorial/tree/master
+3. https://stackoverflow.com/questions/39975996/django-migrations-what-benefits-do-they-bring
+4. https://blog.miguelgrinberg.com/post/why-do-we-pass-name-to-the-flask-class
+5. https://stackoverflow.com/questions/4357007/what-does-slug-mean
+6. https://stackoverflow.com/questions/39869793/when-do-i-need-to-use-sqlalchemy-back-populates
+7. https://www.youtube.com/watch?v=aAy-B6KPld8&t=515s (Arjan Codes)
+8. https://stackoverflow.com/questions/46462152/is-it-necessary-to-use-relationship-in-sqlalchemy
+9. https://stackoverflow.com/questions/51335298/concepts-of-backref-and-back-populate-in-sqlalchemy
+10. https://stackoverflow.com/questions/53269323/flasks-jsonify-function-inconsistent-with-flask-marshmallow
+11. https://stackoverflow.com/questions/58896928/how-to-connect-to-sqlite-from-sqlalchemy
+12. https://www.youtube.com/watch?v=jgpVdJB2sKQ&t=258s (Redis CLI commands)
+13. https://docs.aws.amazon.com/whitepapers/latest/database-caching-strategies-using-redis/cache-validity.html
+14. https://stackoverflow.com/questions/36302972/how-to-update-redis-after-updating-database
+
 ### Extras
 1. https://www.youtube.com/watch?v=RHwglGf_z40&t=1529s - Patroni
 2. https://www.youtube.com/watch?v=fvpq4jqtuZ8 - Connecting to database outside Kubernetes
 3. Check out Signoz 
+4. Review Day 8 Postgres manifest (configfile and persistentvolume)
