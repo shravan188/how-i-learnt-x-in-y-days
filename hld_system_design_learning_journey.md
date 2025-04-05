@@ -1220,7 +1220,7 @@ CMD ["python", "app.py"]
 17. https://stackoverflow.com/questions/39901311/docker-ubuntu-bash-ping-command-not-found
 
 
-## Day 8
+## Day 8 and 12
 
 * Resources : Key Kubernetes resouces include:
     * Deployment (kubectl get deploy)
@@ -1378,6 +1378,143 @@ spec:
 
 * On doing `kubectl describe service <service-name>`, the LoadBalancer Ingress gives the external ip of the service (assuming the service is of the right type)
 
+* The manifest file for Postgres is as follows
+  * ConfigMap : They require a top-level data field that defines the key-value config pairs to store
+
+```
+apiVersion: "v1"
+kind: "ConfigMap"
+metadata:
+  name: "postgres-config"
+  namespace: "default"
+  labels:
+    app: "postgres"
+data:
+  POSTGRES_DB: "demo_db"
+  POSTGRES_USER: "pgusername"
+  POSTGRES_PASSWORD: "pgpassword"
+
+---
+
+apiVersion: "apps/v1"
+kind: "Deployment"
+metadata:
+  name: "postgres"
+  namespace: "default"
+  labels:
+    app: "postgres"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: "postgres"
+  template:
+    metadata:
+      labels:
+        app: "postgres"
+    spec:
+      containers:
+      - name: "postgres"
+        image: "postgres"
+        env:
+        - name: "POSTGRES_DB"
+          valueFrom:
+            configMapKeyRef:
+              key: "POSTGRES_DB"
+              name: "postgres-config"
+        - name: "POSTGRES_USER"
+          valueFrom:
+            configMapKeyRef:
+              key: "POSTGRES_USER"
+              name: "postgres-config"
+        - name: "POSTGRES_PASSWORD"
+          valueFrom:
+            configMapKeyRef:
+              key: "POSTGRES_PASSWORD"
+              name: "postgres-config"
+      ports:
+        - containerPort: 5432
+          name: "postgres"
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postges-pv-claim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  ports:
+    - port: 5432 # since targetPort not specified, targetPort = port = 5432 
+  selector:
+    app: postgres
+  
+
+
+```
+
+* ConfigMap help **set configuration data separately from application code** (similar to why we have a separate configuration.py in Flask). Configuration data includes thing like database username, password, server etc whereas the application code includes operations like reaing from/writing to database/
+
+* Kubernetes stores ConfigMaps in its etcd datastore. You shouldn’t directly edit etcd data; instead, use the Kubernetes API server and Kubectl to create and manage your ConfigMaps (to back up ConfigMap values, follow the guidance to set up backups for etcd)
+
+* To use to values (or rather key-value pairs) defined in the ConfigMap, we use either valueFrom or envFrom with configMaKeyRef 
+
+* envFrom vs keyFrom : envFrom imports all key-value pairs from a ConfigMap or Secret, setting them as environment variables, while valueFrom allows you to select specific keys from a ConfigMap or Secret and use their values for individual environment variables
+
+* Volumes: A volume is essentially a directory, accessible to the containers in a pod, where data is stored for the life of the pod. Provide a way for containers in a pod to access and share data via the filesystem. We need volumes for 2 reasons:
+  * Data Persistence : When container crashes/stops, all of the files that were created or modified during the lifetime of the container are lost. 
+  * Shared Storage : To share files across containers in a pod
+
+* Ephemeral volume types have a lifetime linked to a specific Pod, but persistent volumes exist beyond the lifetime of any individual pod
+
+* Mounting : "Mount" is the Posix term for taking some sort of storage and attaching it to a filesystem at a given point. If you hook a new harddrive up to a computer running Linux, all you'll see at first is a new device under /dev. You have to "mount" it for it to be accessible at /some/directory where you can now browse the files etc. This is something Windows, Mac, and even desktop Linux users don't ever really have to deal with as it's done automatically - insert a new USB thumb drive into a laptop and chances are it'll get automatically mounted somewhere and you just start using it. When you do the "safely remove USB" thing in Windows, essentially you're unmounting the drive. Once it's detached from the filesystem programs can't be reading or writing to the files on the drive, which is why it's now safe to remove.
+
+* Volume Mount : Volume mount refers to the process of making a volume (a directory or file on the host machine) accessible to a container, allowing data to be shared and persisted even after the container is stopped or restarted
+
+* MountPath : Where inside the container the volume is
+
+* Persistent Volume (PV) is a piece of storage in the cluster. It is a resource in the cluster just like a node is a cluster resource. They have a lifecyle independent of any pods that use them
+
+* PersistentVolumeClaim (PVC) is a request for storage by a user (unlike persistent volume which is provisioned by admin). PVCs consume PV resources, just like how pods consume node resources. Claims can request specific size and access modes 
+
+* StorageClass : The kind (class) of storage. Helps cluster administrators to offer users a variety of PersistentVolumes without exposing to users the details of how those volumes are implemented.  
+
+* Persistent Volume is to Persistent Volume Claim what Node is to Pod
+
+* Types of persistent volumes include:
+  * hostPath :  HostPath volume (for single node testing only; WILL NOT WORK in a multi-node cluster; consider using local volume instead)
+  * local : local storage devices mounted on nodes
+  * nfs - Network File System (NFS) storage
+  * glusterfs - GlusterFS storage. (not available starting v1.26)
+
+* Types of access modes in PVC include:
+  * ReadWriteOnce (RWO) : This access mode lets a single node mount the volume as read-write at a time.
+  * ReadOnlyMany (ROX) : This access mode lets multiple nodes mount the volume as read-only simultaneously.
+  * ReadWriteMany (RWX) : This access mode lets multiple nodes mount the volume as read-write simultaneously.
+  * ReadWriteOncePod (RWOP) : This access mode allows the volume to be mounted as read-write by a single pod. This is a more restrictive version of RWO, ensuring that only one pod can write to the volume at any time.
+
+* Some example use cases : RWO is useful for databases, ROX for creating database read replica so as to offload read queries from the primary database instance, RWX is useful for applications requiring a shared writable storage environment
+
+* The lifecycle of PVC includes
+  * Provisioning
+  * Binding
+  * Using
+  * Reclaim
+
+*  If a Kubernetes service definition doesn't specify a targetPort, the service will default to using the value of the port field as the target port for forwarding traffic to the pods. 
+
 * Istio : Ingress controller
 
 ```
@@ -1491,6 +1628,9 @@ ping 10.1.0.35 # ping was succeeful
 9. What is difference bw NodePort, LoadBalancer and Ingress?
 10. I tried bashing into a Kubernetes pod and then trying to ping a service, but it did not work. Why?
 11. How to make 2 Kubernetes services talk to each other? For example, I have a Flask app running on 1 node, how do I connect to the Postgres service using sqlalchemy?
+12. What is the difference bw envFrom and valueFrom in the context of configmap in Kubernetes? When do we use each of them? (refer 32)
+13. What happens to volume if pod crashes?
+14. Where is Kubernetes storage location of a Persistent Volume? Where is it when we run Kubernetes on Docker? How do we the contents stored within a peristent volume?
 
 ### References
 1. https://stackoverflow.com/questions/42078080/add-nginx-conf-to-kubernetes-cluster
@@ -1523,7 +1663,12 @@ ping 10.1.0.35 # ping was succeeful
 28. https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/
 29. https://stackoverflow.com/questions/45720084/how-to-make-two-kubernetes-services-talk-to-each-other
 30. https://www.digitalocean.com/community/tutorials/how-to-inspect-kubernetes-networking
-
+31. https://spacelift.io/blog/kubernetes-configmap
+32. https://stackoverflow.com/questions/66352023/when-should-i-use-envfrom-for-configmaps 
+33. https://humanitec.com/blog/handling-environment-variables-with-kubernetes
+34. https://kubernetes.io/docs/concepts/storage/persistent-volumes/
+35. https://www.reddit.com/r/kubernetes/comments/ilwvlu/volumes_and_volume_mounts_still_confuse_me/
+36. https://www.baeldung.com/ops/kubernetes-access-modes-persistent-volumes
 
 ## Day 9
 
@@ -2194,6 +2339,8 @@ VALUES
 
 
 ```
+* Tested the application at 127.0.0.1:9000, 127.0.0.1:9000/users, 127.0.0.1:9000,roles. Also tested using Postman with a POST request to 
+
 
 * Since we cache the data for roles, if we insert a new role and then try to retrive all roles we will not the get the latest data.
 
@@ -2259,6 +2406,143 @@ TTL flask_cache_view//roles
 12. https://www.youtube.com/watch?v=jgpVdJB2sKQ&t=258s (Redis CLI commands)
 13. https://docs.aws.amazon.com/whitepapers/latest/database-caching-strategies-using-redis/cache-validity.html
 14. https://stackoverflow.com/questions/36302972/how-to-update-redis-after-updating-database
+
+
+## Day 11
+* First, lets talk sentinel. Sentinel manages the failover, it doesn't configure Redis for HA. It is an
+
+* Kubernetes enables Pods to communicate with each other across Nodes in a cluster. This Pod network is implemented through networking plugins such as Flannel, Calico, Canal, Weave Net.
+
+* To find the network plugin, type `kubectl get pods -n kube-system`
+
+* Some common Ingress controllers include:
+  * NGINX Ingress Controller - The default Ingress controller. It uses NGINX as a reverse proxy and load balancer.
+  * Traefik - A cloud native edge router that works as an Ingress controller. It can be configured through Kubernetes Manifests.
+  * HAProxy Ingress - Uses the HAProxy load balancer as an Ingress controller. Provides high availability.
+  * GCE - The Ingress controller provided by Google Kubernetes Engine. Uses a GCP load balancer.
+  * Istio Ingress - Provides Ingress capabilities as part of the Istio service mesh.
+
+* Redis is essentially a Python dictionary (https://realpython.com/python-redis/)
+
+* We need atleast 3 redis instances 
+
+* Was unable to create a high availability Redis cluster following That Devops Guy tutorial, hence created a simple Redis pod using ref 8
+
+
+```
+### redis-deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:latest
+        ports:
+        - containerPort: 6379
+
+
+### redis-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  selector:
+    app: redis
+  ports:
+    - protocol: TCP
+      port: 6379
+      targetPort: 6379
+
+
+```
+
+
+* To test also created a Redis client pod
+```
+### redis-client-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: redis-client
+spec:
+  containers:
+  - name: redis-client
+    image: redis:latest
+    command: ["redis-cli"]
+    tty: true
+
+```
+
+
+
+* Ran the following commands in terminal
+
+```
+kubectl -n redis get all
+
+kubectl delete namespace redis
+
+kubectl create namespace redis1
+
+kubectl -n redis1 get all
+# No resources found in redis1 namespace.
+
+kubectl -n redis1 apply -f redis-deployment.yaml
+
+kubectl -n redis1 get all
+
+kubectl -n redis1 apply -f redis-service.yaml
+# pod/redis-56bc99cc99-mtf52   1/1     Running   0          2m12s
+# service/redis   ClusterIP   10.103.20.226   <none>        6379/TCP   22s
+# deployment.apps/redis   1/1     1            1           2m12s
+# replicaset.apps/redis-56bc99cc99   1         1         1       2m12s
+
+
+kubectl -n redis1 apply -f redis-client-pod.yaml
+
+kubectl -n redis1 exec -it redis-client -- redis-cli -h redis 
+
+kubectl get pods -n redis1 -o wide
+
+```
+
+* Errors:
+  * Docker Failed to start : delete %appdata%\Docker\settings.json and let Docker to create a new one
+  * Redis pods not starting, logs just showing Defaulted container "redis" out of: redis, config (init). Was not able to resolve
+
+### Doubts
+1. What is local volume standard storage?
+2. What is an initContainer?
+3. What is the difference bw host path and local volume?
+4. How to delete all the resources within a namespace?
+5. When I do kubectl get nodes, it shows only 1 control plane?
+6. Can all pods in Kubernetes communicate with each other, even across different nodes and different namespaces?
+7. How to identify network plugin in Kubernetes cluster?
+
+### References
+1. https://stackoverflow.com/questions/31143072/redis-sentinel-vs-clustering
+2. https://github.com/marcel-dempers/docker-development-youtube-series/tree/master/storage/redis/kubernetes
+3. https://stackoverflow.com/questions/51209870/minikube-vs-kubernetes-in-docker-for-windows
+4. https://forums.docker.com/t/solved-docker-failed-to-start-docker-desktop-for-windows/106976
+5. https://weng-albert.medium.com/local-volume-vs-hostpath-en-8c214c1dca74
+6. https://stackoverflow.com/questions/63490278/kubernetes-persistent-volume-hostpath-vs-local-and-data-persistence
+7. https://stackoverflow.com/questions/47128586/how-to-delete-all-resources-from-kubernetes-one-time
+8. https://medium.com/@harshaljethwa19/redis-deploying-redis-on-kubernetes-building-chat-applications-with-redis-pub-sub-on-kubernetes-f81a56ec0273
+9. https://medium.com/@achanandhi.m/how-to-identify-the-network-plugin-in-your-kubernetes-cluster-1f0d1dcdd937
+10. https://zeet.co/blog/kubernetes-networking-101-your-straightforward-guide-to-connecting-pods-and-services
 
 ### Extras
 1. https://www.youtube.com/watch?v=RHwglGf_z40&t=1529s - Patroni
