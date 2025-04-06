@@ -1436,6 +1436,16 @@ spec:
         - containerPort: 5432
           name: "postgres"
 
+      volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/db-data
+    
+    volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: postgres-pv-claim
+  
+
 ---
 
 apiVersion: v1
@@ -1473,17 +1483,33 @@ spec:
 
 * envFrom vs keyFrom : envFrom imports all key-value pairs from a ConfigMap or Secret, setting them as environment variables, while valueFrom allows you to select specific keys from a ConfigMap or Secret and use their values for individual environment variables
 
-* Volumes: A volume is essentially a directory, accessible to the containers in a pod, where data is stored for the life of the pod. Provide a way for containers in a pod to access and share data via the filesystem. We need volumes for 2 reasons:
+* Volumes: A volume is essentially a directory with data, accessible to multiple containers in a pod, where data is stored for the life of the pod. Provide a way for containers in a pod to access and share data via the filesystem. We need volumes for 2 reasons:
   * Data Persistence : When container crashes/stops, all of the files that were created or modified during the lifetime of the container are lost. 
   * Shared Storage : To share files across containers in a pod
-
-* Ephemeral volume types have a lifetime linked to a specific Pod, but persistent volumes exist beyond the lifetime of any individual pod
 
 * Mounting : "Mount" is the Posix term for taking some sort of storage and attaching it to a filesystem at a given point. If you hook a new harddrive up to a computer running Linux, all you'll see at first is a new device under /dev. You have to "mount" it for it to be accessible at /some/directory where you can now browse the files etc. This is something Windows, Mac, and even desktop Linux users don't ever really have to deal with as it's done automatically - insert a new USB thumb drive into a laptop and chances are it'll get automatically mounted somewhere and you just start using it. When you do the "safely remove USB" thing in Windows, essentially you're unmounting the drive. Once it's detached from the filesystem programs can't be reading or writing to the files on the drive, which is why it's now safe to remove.
 
 * Volume Mount : Volume mount refers to the process of making a volume (a directory or file on the host machine) accessible to a container, allowing data to be shared and persisted even after the container is stopped or restarted
 
 * MountPath : Where inside the container the volume is
+
+* Note : The name of the volumeMount (spec.container.volumeMounts) should match the name of the volume (spec.volumes) for the mount to be successful (refer example below). Also volume and volumeMounts go hand in hand. You can not create a volume without mounting it or mount a volume that has not been created. 
+
+```
+spec:
+  volumes:
+    name: xyz
+  containers:
+  - name: my-app
+    image: nginx
+    volumeMounts:
+    - name: xyz # match volume name
+      mountPath: /app/config
+
+
+```
+
+* Ephemeral volume types have a lifetime linked to a specific Pod, but persistent volumes exist beyond the lifetime of any individual pod
 
 * Persistent Volume (PV) is a piece of storage in the cluster. It is a resource in the cluster just like a node is a cluster resource. They have a lifecyle independent of any pods that use them
 
@@ -1514,6 +1540,8 @@ spec:
   * Reclaim
 
 *  If a Kubernetes service definition doesn't specify a targetPort, the service will default to using the value of the port field as the target port for forwarding traffic to the pods. 
+
+*
 
 * Istio : Ingress controller
 
@@ -1631,6 +1659,8 @@ ping 10.1.0.35 # ping was succeeful
 12. What is the difference bw envFrom and valueFrom in the context of configmap in Kubernetes? When do we use each of them? (refer 32)
 13. What happens to volume if pod crashes?
 14. Where is Kubernetes storage location of a Persistent Volume? Where is it when we run Kubernetes on Docker? How do we the contents stored within a peristent volume?
+15. What is the difference bw deployment with persistent volume claim and a Statefulset?
+16. Should name of volumeMount match volume name?
 
 ### References
 1. https://stackoverflow.com/questions/42078080/add-nginx-conf-to-kubernetes-cluster
@@ -1669,6 +1699,7 @@ ping 10.1.0.35 # ping was succeeful
 34. https://kubernetes.io/docs/concepts/storage/persistent-volumes/
 35. https://www.reddit.com/r/kubernetes/comments/ilwvlu/volumes_and_volume_mounts_still_confuse_me/
 36. https://www.baeldung.com/ops/kubernetes-access-modes-persistent-volumes
+37. https://www.kubermatic.com/blog/keeping-the-state-of-apps-1-introduction-to-volume-and-volumemounts/
 
 ## Day 9
 
