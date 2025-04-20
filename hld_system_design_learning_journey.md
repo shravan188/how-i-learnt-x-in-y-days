@@ -30,6 +30,7 @@
 ### Doubts
 1. Why is cache faster than database? (in memory vs disk)
 2. What exactly is partition tolerance?
+3. Are microservices overrated?
 
 ### References
 1. https://www.youtube.com/watch?v=CESKgdNiKJw
@@ -37,7 +38,7 @@
 3. https://fastapi.tiangolo.com/deployment/docker/
 4. https://web.archive.org/web/20221030091841/http://www.lecloud.net/tagged/scalability/chrono
 5. https://www.youtube.com/watch?v=mI73eTlSqeU&list=PL6W8uoQQ2c63W58rpNFDwdrBnq5G3EfT7 (Concept and Coding By Shrayansh Jain)
-
+6. https://www.reddit.com/r/webdev/comments/83tjhn/are_microservices_overrated/
 
 ## Day 2 and 3
 
@@ -108,7 +109,6 @@ The health data needs to be stored somewhere where all other Patroni instances c
 2. Whats-the-correct-way-to-mount-a-volume-on-docker-for-windows?
 3. What is source command in linux?
 4. How to change a leader in etcd cluster?
-
 ### References
 1. https://www.youtube.com/watch?v=3qRBeZsUa18&list=PL6W8uoQQ2c63W58rpNFDwdrBnq5G3EfT7&index=3
 2. https://stackoverflow.com/questions/49726272/what-is-the-rm-flag-doing
@@ -605,6 +605,8 @@ listen http_proxy
 
 
 ## Day 6
+
+* Worked with Kubernetes for the first time ever on 28th-March-2025 (started learning Kubernetes today)
 
 * Installed kind using Powershell, moved it into C:\kind and then added that location to path
 
@@ -1189,6 +1191,7 @@ RUN poetry install
 
 CMD ["python", "app.py"]
 ```
+
 
 ### Doubts
 1. Why do we maintain database migrations for a Django/Flask app? Is it because sqlalchemy cannot update existing tables?
@@ -2575,8 +2578,702 @@ kubectl get pods -n redis1 -o wide
 9. https://medium.com/@achanandhi.m/how-to-identify-the-network-plugin-in-your-kubernetes-cluster-1f0d1dcdd937
 10. https://zeet.co/blog/kubernetes-networking-101-your-straightforward-guide-to-connecting-pods-and-services
 
+
+## Day 13 and 14 (incomplete, go through all the files in end-to-end project and type each line by hand)
+
+* Network identity : refers to the concept that each pod gets its own unique IP address, enabling pods to communicate with each other directly (also known as pod per ip model)
+
+* Stateful set : StatefulSet runs a group of Pods, and maintains a sticky identity for each of those Pods (useful for managing applications that need persistent storage or a stable, unique network identity)
+
+* Each pod in the StatefulSet receives a stable network identity by assigning them unique, persistent hostnames (derived from the StatefulSet name and ordinal index such as db-0, db-1) that remain consistent even if a pod is rescheduled or restarted
+
+* In Deployments, pods are interchangeable (mainly for stateless application like a Flask application), whereas in Stateful Set, each pod has unique identity and are not interchangeable. 
+
+* The IP address of a pod in Stateful set can change (especially upon pod restart or rescheduling), but the DNS record and hostname (which together form network identity) will remain the same. We can n go to the pod of a stateful set using the following DNS : podname-{replica-index}.{serviceName}.default.svc.cluster.local
+
+* As done earlier, if we want to ping a pod,we cannot do it directly from host system. Instead we can
+  * Run the ping command from a worker node.
+  * Deploy another container (preferably in a different namespace) and ping from there.
+  * Forward the IP range of the worker nodes to your client device with the DNS e.g. using something like sshuttle
+
+* Headless service : Headless service allows direct access to individual pods without a load balancer or a single virtual IP address, instead exposing the pods' IP addresses through DNS records, useful for scenarios requiring direct pod communication
+
+* Whenever the clusterIP is set to none that means that it is a headless service. StatefulSets currently require a Headless Service to be responsible for the network identity of the Pods. Because unlike the stateless deployments the statefulset pods will have Stable, unique network identifiers(pod names).
+
+* The only thing that I found that works is that headless (with clusterIP: None) service creates the <pod-name>.<service-name>.<namespace>.svc.<cluster-suffix> entries (plus the <service-name>.<namespace>.svc.<cluster-suffix> as A records for all endpoints). Which means I need two services for the StatefulSet. Took quite a bit of trial and error to find out
+
+* By default, Kubernetes pod and service DNS names are only resolvable from within the cluster, not from your local machine. Instead we have to run a temporary pod within the same cluster and then can do a nslookup
+
+
+```
+### flask-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: flask-ingress
+
+
+
+
+
+
+
+```
+
+
+
+```
+
+docker-compose up --build
+
+## tested POST request using POSTMAN, this is the equivalent cURL command
+curl --location 'http://localhost:5002/orders' \
+--header 'Content-Type: application/json' \
+--data '{
+    "id" : "o553",
+    "item" : "Shoes",
+    "quantity" : 2,
+    "user_id" : "u101"
+}'
+
+
+curl --location --request GET http://localhost:5002/orders/o553
+
+docker-compose up --build
+
+curl --location 'http://localhost:5001/users' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "id" : "u101",
+    "name" : "Shoes",
+    "email" : "john@gmail.com"
+}'
+
+curl --location --request GET http://localhost:5001/users/u101
+## OUTPUT: {"email":"john@gmail.com","id":"u101","name":"Shoes"}
+
+
+```
+
+
+```
+kubectl get nodes
+
+kubectl get namespaces
+
+kubectl create namespace final-proj-1
+
+kubectl -n final-proj-1 apply -f redis-statefulset.yaml
+
+kubectl -n final-proj-1 apply -f client-pod.yaml
+
+kubectl -n final-proj-1 describe pod client-pod
+
+## Change the current namespace
+kubectl config set-context --current --namespace=final-proj-1
+
+## Check the current namespace
+kubectl config view --minify | grep namespace
+
+kubectl describe pod alpine
+
+kubectl logs apline
+
+kubectl apply -f apline.yaml
+
+kubectl exec -it alpine -- sh
+
+kubectl get pods -o wide 
+ping 10.1.0.88
+
+apk update
+apk get curl
+```
+
+```
+docker build --tag user-service . 
+
+docker tag user-service ksshr/user-service
+
+docker login
+
+docker push ksshr/user-service
+
+#kubectl apply -f kubernetes\user-deployment.yaml
+kubectl apply -f user-deployment.yaml
+
+kubectl port-forward svc/user-service 80
+# OUTPUT : Forwarding from 127.0.0.1:80 -> 5001
+# OUTPUT : Forwarding from [::1]:80 -> 5001
+# Visited 127.0.0.1 in the browser successfully (image pull working as expected)
+# I had commented the init container
+
+docker build --tag order-service .
+docker tag order-service ksshr/order-service
+docker login
+docker push ksshr/order-service
+
+kubectl apply -f order-deployment.yaml
+kubectl port-forward svc/order-service 80
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.9.5/deploy/static/provider/cloud/deploy.yaml
+
+kubectl get all -n ingress-nginx 
+
+kubectl get pods -n default
+kubectl -n default delete service/service-b
+kubectl -n default delete service/service-a
+kubectt delete pod service-a-bb574c9fb-sd9zf
+
+
+
+kubectl get ingress
+kubectl get service ingress-nginx-controller --namespace=ingress-nginx
+
+
+
+
+```
+
+
+
+* Spiderpool is an underlay and RDMA network solution for the Kubernetes.
+
+* CrashLoopBackOff means that Kubernetes was able to successfully pull the image and start your container, but then the container process exited with an error. Faced this error when trying to deploy a simple Alpine container (more details in errors section)
+
+* In Kubernetes, every pod gets its own ip address from 10.*, that is usable only within the cluster
+
+* port-forward : This feature of kubectl simply tunnels the traffic from a specified port at your local host machine to the specified port on the specified pod. API server then becomes, in a sense, a temporary gateway between your local port and the Kubernetes cluster. Used mainly for testing/debugging (in a way similar to port mapping in docker)
+
+* The flask-ingress.yaml you’re using defines an Ingress resource, but to actually expose it, you need a running Ingress Controller, like NGINX.
+
+* Issue : NGINX Ingress Controller was using leftover config or not seeing your new flask-ingress at all.
+
+```
+
+kubectl get ingressclass
+# Add ingressClassName: nginx to your Ingress (flask-ingress.yaml)
+kubectl apply -f flask-ingress.yaml
+kubectl logs -n ingress-nginx deploy/ingress-nginx-controller
+kubectl describe ingress flask-ingress
+# Rules:
+#  Host        Path  Backends
+#  ----        ----  --------
+#  *
+#              /users    user-service:80 (10.1.0.109:5001)
+#              /orders   order-service:80 (10.1.0.110:5002)
+
+kubectl get ingress -A
+kubectl delete ingress service-a -n default 
+kubectl delete ingress service-b -n default 
+kubectl get ingress -A
+
+kubectl port-forward svc/ingress-nginx-controller -n ingress-nginx 8080:80
+
+```
+* When trying to go to http://127.0.0.1:8080/users, it is giving URL not found error, same for http://127.0.0.1:8080/orders. Create a simple route in order_service.py using `@app.route('/', methods=['GET'])` and that route worked. However even when calling http://127.0.0.1:8080/orders/orders, the above route was called. So no matter what I type after http://127.0.0.1:8080/orders, only the / route is called
+
+* Capture Group : 
+
+* Service and Ingress resource types that define two ways to control the inbound traffic in a Kubernetes cluster. 
+
+* Load Balancer vs Ingress controller : Load balancer is configured to distribute traffic to the pods in your Service on a given port. The LoadBalancer only works at layer 4 - the Service is unaware of the actual applications, and can't make any additional routing considerations. Ingress controllers work at layer 7, and can use more intelligent rules to distribute application traffic. A common use of an Ingress controller is to route HTTP traffic to different applications based on the inbound URL.
+
+* Creating a Postgres deployment with multiple replicas pointing to the same persistent volume (PV) can cause corrupted data, as two instances can try to write the same data at the same time. Moreover create a simple StatefulSet and set replicas: 2 is wrong as each StatefulSet pod gets its own storage and its own PersistentVolumeClaim and Kubernetes doesn't know how to trigger synchronization in whatever application the pod is running. A good way to solve this is to use Statefulsets and configure Replication on the database level, for example using Postgres native replication or Patroni. And use the volumeClaimTemplate system so each pod gets its own distinct storage (refer 24, 25, 26)
+
+* Each Pod in the StatefulSet is assigned its own Persistent Volume (PV) and Persistent Volume Claim (PVC)
+
+* Checkout https://kubernetes-tutorial.schoolofdevops.com/13_redis_statefulset/
+
+```
+git init
+# Add a .gitignore
+
+git add kubernetes/
+git add user-service/  
+git commit -m "add all files"  
+git remote add origin https://github.com/shravankshenoy/End-to-End-Kubernetes-Devops-Project.git
+git pull origin main --allow-unrelated-histories 
+git push origin master:main 
+
+```
+
+* Created an architecture diagram like https://github.com/AmanPathak-DevOps/End-to-End-Kubernetes-Three-Tier-DevSecOps-Project using 19. Took inspiration from eks workshop (ref 27)
+
+* Potential next steps
+  * Helm chart version of all this
+  * Separate namespaces
+  * Secrets for DB credentials
+  * Metrics + liveness/readiness probes
+
+* Errors faced:
+  * error: src refspec main does not match any
+  error: failed to push some refs to 'https://github.com/shravankshenoy/End-to-End-Kubernetes-Devops-Project.git'.Updates were rejected because the remote contains work that you do not have locally
+  *  pg_config is required to build psycopg2 from source.  Please add the directory containing pg_config to the $PATH or specify the full executable path with the option or with the pg_config option in 'setup.cfg'. Solution : RUN apt-get update && apt-get -y install libpq-dev gcc OR pip install psycopg2-binary
+  * sqlalchemy.exc.OperationalError: (psycopg2.OperationalError) connection to server at "postgres" (172.18.0.2), port 5432 failed: Connection refused. Is the server running on that host and accepting TCP/IP connections?
+  * psycopg2.errors.UndefinedTable: relation "users" does not exist 
+  * Status CrashLoopBackOff : Alpine does not have bash by default so we need to change /bin/bash to /bin/sh, which is present in Alpine:
+  * The Pod "client-pod" is invalid: spec: Forbidden: pod updates may not change fields other than spec.containers[*].image, spec.initContainers[*].image, spec.activeDeadlineSeconds, spec.tolerations (only additions to existing tolerations) or spec.terminationGracePeriodSeconds (allow it to be set to 1 if it was previously negative) : Reason: To change anything else (like command, tty, stdin, name), you need to recreate the pod. We can do that by `kubectl delete pod client-pod` followed by `kubectl apply -f client-pod.yaml`
+  * Warning: path /users(/|$)(.*) cannot be used with pathType Prefix
+
+### Doubts
+1. How to test a docker image? And how to manage test data with docker images?
+2. What is depends_on in docker compose?
+3. What is the significance of version in docker compose file?
+4. What does `Base.metadata.create_all(engine)` do and how is it useful for local testing?
+5. Should the selector in service match metadata or spec.template.metadata.labels? What is the purpose of the metadata in deploment/statefulset?
+6. What is network identity in Kubernetes?
+7. Does the ip address of a statefulset pod never change
+8. When do we set clusterIp to none?
+9. How can I expose a Statefulset with a load balancer?
+10. How to ping a statefulset pod kubernetes?
+11. How does `kubectl port-forward` used in day 9 works?
+12. Is kubernetes port-forward similar to Docker port mapping?
+13. How to force Kubernetes to repull an image? (delete the pod)
+13. How do I push a local Git branch (or master branch) to main branch in the remote?
+14. What's the purpose of using Zookeeper rather than just databases for managing distributed systems?
+15. What is the difference between Helm and Kustomize?
+16. How do we test microservices? What are different kind of tests involved?
+17. How is alb (AWS Load Balancer) different from Nginx Ingress controller?
+18. Is ingress-nginx really a load balancer or not?
+19. Since each pod of a stateful set has its own PVC, will the data in the different PVC be in sync?
+20. If I declare 2 replicas of PostgreSQL StatefulSet pods in k8s, are they the same database or they just share the volume? If neither, then isnt it better to use deployment with PVC?
+
+
+### References
+1. https://www.reddit.com/r/docker/comments/jub4fs/how_do_folks_manage_test_data_with_docker_images/
+2. https://github.com/GoogleContainerTools/container-structure-test
+3. https://stackoverflow.com/questions/35104097/how-to-install-psycopg2-with-pg-config-error
+4. https://superuser.com/questions/1646555/how-to-get-the-hostname-of-a-service-in-kubernetes
+5. https://serverfault.com/questions/1119093/when-and-how-we-should-specify-clusterip-inside-the-service-yaml-file
+6. https://stackoverflow.com/questions/52707840/what-is-a-headless-service-what-does-it-do-accomplish-and-what-are-some-legiti
+7. https://stackoverflow.com/questions/52274134/connect-to-other-pod-from-a-pod
+8. https://spacelift.io/blog/crashloopbackoff
+9. https://github.com/infrabricks/kubernetes-standalone/blob/master/examples/alpine.yml
+10. https://stackoverflow.com/questions/75325649/what-is-the-purpose-of-headless-service-in-kubernetes
+11. https://stackoverflow.com/questions/45142855/bin-sh-apt-get-not-found
+12. https://stackoverflow.com/questions/59559438/retrieve-the-full-name-of-a-service-in-kubernetes
+13. https://stackoverflow.com/questions/51468491/how-does-kubectl-port-forward-create-a-connection
+14. https://medium.com/@haroldfinch01/how-do-i-force-kubernetes-to-re-pull-an-image-cf2b8c4854bc
+15. https://www.linkedin.com/pulse/difference-between-cache-vs-database-githin-nath
+16. https://stackoverflow.com/questions/36312640/whats-the-purpose-of-using-zookeeper-rather-than-just-databases-for-managing-di
+17. https://stackoverflow.com/questions/60519939/what-is-the-difference-between-helm-and-kustomize
+18. https://www.lambdatest.com/blog/testing-microservices/
+19. https://app.diagrams.net/
+20. https://aws.amazon.com/blogs/containers/exposing-kubernetes-applications-part-3-nginx-ingress-controller/
+21. https://learn.microsoft.com/en-us/answers/questions/295210/is-ingress-nginx-really-a-load-balancer-or-not
+22. https://www.eksworkshop.com/docs/introduction/getting-started/microservices
+23. https://www.reddit.com/r/kubernetes/comments/ph64go/statefulsets_storage_sync/
+24. https://stackoverflow.com/questions/68516778/if-i-declare-2-replicas-of-postgresql-statefulset-pods-in-k8s-are-they-the-same
+25. https://www.reddit.com/r/kubernetes/comments/z7jrob/can_you_create_a_postgres_deployment_with/
+26. https://github.com/zalando/postgres-operator
+27. https://www.eksworkshop.com/docs/introduction/getting-started/microservices
+28. https://stackoverflow.com/questions/47837087/nginx-ingress-rewrite-target
+29. https://stackoverflow.com/questions/46720563/kubernetes-ingress-load-balancer-rewrites-everything-to-index-why
+30. https://stackoverflow.com/questions/59491324/is-there-a-way-to-kubectl-apply-all-the-files-in-a-directory
+
+## Day 15 (incomplete)
+
+* Fixtures : Fixtures are functions, which will run before each test function to which it is applied
+
+```
+## test_maths.py
+
+import pytest
+
+@pytest.fixture
+def input_value():
+    input = 39
+    return input
+
+def test_divisible_by_3(input_value):
+    assert input_value % 3 == 0
+
+## pytest test_maths.py
+
+```
+
+### Doubts
+1. Is fixture a decorator?
+
+### References
+1. https://www.tutorialspoint.com/pytest/pytest_fixtures.htm
+
+
+## Day 16 and 17
+
+* CQRS is an architectural pattern that separates the responsibility of executing commands that change data (write operations) from the responsibility of retrieving data (read operations).
+
+* Event sourcing is a software architectural pattern where changes to an application's state are stored as a sequence of events, rather than directly updating the current state.
+
+* Event Sourcing vs SCD2 : Event Sourcing focuses on capturing and storing all changes as a sequence of events, while SCD2 focuses on managing historical changes to dimension data in a data warehouse. Event Sourcing is a software architectural pattern, often used in microservices and complex systems, while SCD2 is a data warehousing technique
+
+* Pull only : Kafka does not actively push notifications to consumers; instead, consumers proactively pull messages from Kafka topics. The Consumer Design section in the Apache Kafka documentation explains why "consumer pulling" was choosed over "broker pushing".
+
+* consumer.subscribe() in Kafka does indeed cause the consumer to continuously poll the broker for new messages.
+
+* The following code was used to create a Python Kafka producer and consumer. Note that consumer and producer python code was run in separate terminals (in one terminal `python kafka_producer.py` multiple times in second terminal `python kafka_consumer.py`)
+
+```
+########## kafka_producer.py
+
+from confluent_kafka import Producer, Consumer
+from confluent_kafka.admin import AdminClient, NewTopic
+
+import socket
+import json
+import uuid
+import random
+import datetime
+
+
+### MESSAGE DETAILS
+
+order_id = uuid.uuid4().hex[-8:]
+
+order_details = {
+        'status': 100, 
+        'timestamp': int(datetime.datetime.now().timestamp() * 1000), 
+        'order': {
+            'extra_toppings': ['Onion', 'Olives'], 
+            'sauce': 'Tomato', 
+            'cheese': 'Provolone', 
+            'main_topping': 'Pepperoni', 
+            'customer_id': 'd60c39c7744941eb9227c3e47fa791c9', 
+            'username': 'user' + str(random.randint(1000, 9999))
+        }
+    }
+
+
+#### KAFKA PRODUCER CONFIG
+
+HOSTNAME = socket.gethostname()
+
+producer_common_config = {
+            "partitioner": "murmur2_random",
+        }
+
+producer_extra_config={
+        "client.id": f"""pizza_client_webapp_{HOSTNAME}""",
+    }
+
+config_kafka = {
+    'bootstrap.servers': 'localhost:9092'
+    }
+
+
+### KAFKA PRODUCER
+
+PRODUCER = Producer(
+            {
+                **producer_common_config,
+                **config_kafka,
+                **producer_extra_config,
+            }
+        )
+
+
+PRODUCER.produce(
+            "pizza-destroyed",
+            key=order_id,
+            value=json.dumps(order_details).encode(),
+        )
+
+PRODUCER.flush()
+
+
+########## kafka_consumer.py
+
+
+from confluent_kafka import Consumer
+import socket
+import json
+
+HOSTNAME = socket.gethostname()
+
+### KAFKA CONSUMER CONFIG
+
+consumer_common_config = {
+            "enable.auto.commit": False,
+            "auto.offset.reset": "earliest",
+            "max.poll.interval.ms": 3000000,
+        }
+
+config_kafka = {
+    'bootstrap.servers': 'localhost:9092'
+    }
+
+consumer_extra_config={
+        "group.id": f"""pizza_assemble_{HOSTNAME}""",
+        "client.id": f"""pizza_client_assemble_{HOSTNAME}""",
+    }
+
+CONSUMER = Consumer({
+    **consumer_common_config,
+    **config_kafka,
+    **consumer_extra_config
+})
+
+CONSUMER.subscribe(["pizza-ordered"])
+
+try:
+    while True:
+        event = CONSUMER.poll(1.0)
+
+        if event is None:
+            continue
+        if event.error():
+            print(f'Error while consuming: {event.error()}')
+        else:
+            # Parse the received message
+            order_id = event.key().decode()
+            try:
+                order_details = json.loads(event.value().decode())
+                order = order_details.get("order", dict())
+                print(order)
+            except Exception as e:
+                print(e)
+                            
+except KeyboardInterrupt:
+    pass
+finally:
+    # Close the consumer gracefully
+    CONSUMER.close()
+
+
+######## docker-compose.yml
+
+version: '2'
+
+services:
+  zookeeper:
+    image: wurstmeister/zookeeper:latest
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: wurstmeister/kafka:latest
+    ports:
+      - "9092:9092"
+    expose:
+      - "9093"
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka:9093,OUTSIDE://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_LISTENERS: INSIDE://0.0.0.0:9093,OUTSIDE://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CREATE_TOPICS: "my-topic:1:1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+```
+
+* The following commands were used to inspect the messages stored within Kafka topic
+
+```
+docker ps ## The container id used below is docker container id, not zookeeper container id
+
+## To see all the messages in the topic "pizza-ordered"
+docker exec -it cea71d503965 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic pizza-ordered
+
+## To see message in a particular partition at a particular offset
+docker exec -it cea71d503965 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic pizza-ordered --partition 0 --offset 2 --max-messages 1
+
+## To see all messages in a particular partition from a particular offset
+docker exec -it cea71d503965 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic pizza-ordered --partition 0 --offset 2
+
+## To see number of partitions and replications for a pizza-ordered topic
+docker exec -it cea71d503965 /opt/kafka/bin/kafka-topics.sh --describe --bootstrap-server localhost:9092 --topic pizza-ordered
+## Output : Topic: pizza-ordered    TopicId: 5ZDrQLomSTyUfWCjNZoGJw PartitionCount: 1       ReplicationFactor: 1
+
+## To see number of partitions and replications for a pizza-destroyed topic
+docker exec -it cea71d503965 /opt/kafka/bin/kafka-topics.sh --describe --bootstrap-server localhost:9092 --topic pizza-destroyed
+## Output : Topic: pizza-destroyed  TopicId: LwqER9X-QCOuFxFnKYi2kw PartitionCount: 2       ReplicationFactor: 1  
+
+```
+
+* Deserialization : Kafka brokers deal exclusively in bytes. So event data Kafka receives and stores is just raw byte streams. When the consumer get the data, the first step is to deserialize the payload i.e. convert it from bytes to usable data (such as jsonor any format the program can use)
+
+* poll() : To get the messages from Kafka to consumer. When a consumer fetches data from a Kafka broker, it stores it in its local cache
+
+* Kafka stores messages in topics, and each topic can have multiple partitions. Each consumer reads messages from one partition of a topic.
+
+* Offset commit : An integer which keeps track of the messages that consumers read. For ex, if a consumer has read 5 messages from a partition, offset commit is 4. So next time onwards, the consumer consumes messages with offsets 5 onwards
+
+* 4 ways to commit offset by consumer
+  * Auto commit (default) : at every five seconds Kafka commits the largest offset returned by the poll() method 
+  * Manual sync commit
+  * Manual async commit
+  * Commit specific offset
+
+* Auto commit drawbacks : There is a very high chance of data loss in case of application failure. Let’s say poll() returns 100 messages, which the consumer stores in its cache, and the consumer processes 60 messages when the auto-commit happens. Then, due to some failure, the consumer crashes (due to which cache is lost). When a new consumer goes live to read messages, it commences reading from offset 101, resulting in the loss of messages between 61 and 100 (refer 10 for different scenarios)
+
+* Exact once processing :  Each message is consumed exactly once, not zero times, not more than 1 time
+
+* Partitioning : Dividing a topic into multiple ordered sequences of records/messages enabling scalability, parallelism. Each ordered sequence of message is called a partition. 
+
+* Every message is characterized by 2 things : partition number and offset number
+
+* Partition rebalancing : The process by which Kafka redistributes partitions across consumers to ensure that each consumer is processing an approximately equal no. of partitions
+
+* auto.offset.reset configuration : Defines how Kafka consumers should behave when no initial committed offsets are available for the partitions assigned to them
+
+* max.poll.records : Set to whatever number you like such that at most you will get that many records on each poll.
+
+* max.poll.interval.ms : Places an upper bound on the amount of time that the consumer can be idle before fetching more records
+
+* Polling vs Fetching : Polling is like asking: “Is it ready yet?” Fetching is like saying: “Give me what’s ready!” 
+
+* Kafka partition key : The producer uses this key to ensure that related messages are sent to the same partition, enabling ordering guarantees within that partition. For example all requests placed by a particular user go to the same partition (say partition 0). This is important, because if they go to different partition (say partition 1), and the consumer/service reading from partition 1 reads before consumer/service reading from partition 0, then the whole order is spoilt. Say a consumer first places an order and then cancels or updates it, then reversing the order will cause an error
+
+* Consumer groups : Help process data in parallel and making sure at the same time that no message is read twice. If all the consumer instances have the same consumer group, then the records will effectively be load balanced over the consumer instances. 
+
+* For real world use case of consumer group refer 14 (essentially when we have a Payment service as producer, Notification and Shipping service as consumers, and there are multiple instances of the Notification and Shipping service) 
+
+* To increase the number of partitions for a topic using Python, we have to use the AdminClientClass
+(to test this, I created 2 consumers by run the kafka_consumer code in 2 terminals, each consumer was assigned to 1 of the 2 partitions)
+```
+from confluent_kafka import Producer, Consumer
+from confluent_kafka.admin import AdminClient, NewTopic
+
+import socket
+import json
+import uuid
+import random
+import datetime
+
+
+### MESSAGE DETAILS
+
+order_id = uuid.uuid4().hex[-8:]
+
+order_details = {
+        'status': 100, 
+        'timestamp': int(datetime.datetime.now().timestamp() * 1000), 
+        'order': {
+            'extra_toppings': ['Onion', 'Olives'], 
+            'sauce': 'Tomato', 
+            'cheese': 'Provolone', 
+            'main_topping': 'Pepperoni', 
+            'customer_id': 'd60c39c7744941eb9227c3e47fa791c9', 
+            'username': 'user' + str(random.randint(1000, 9999))
+        }
+    }
+
+
+#### KAFKA PRODUCER CONFIG
+
+HOSTNAME = socket.gethostname()
+
+producer_common_config = {
+            "partitioner": "murmur2_random",
+        }
+
+producer_extra_config={
+        "client.id": f"""pizza_client_webapp_{HOSTNAME}""",
+    }
+
+config_kafka = {
+    'bootstrap.servers': 'localhost:9092'
+    }
+
+
+### KAFKA PRODUCER
+
+PRODUCER = Producer(
+            {
+                **producer_common_config,
+                **config_kafka,
+                **producer_extra_config,
+            }
+        )
+
+### TOPIC WITH MULTIPLE PARTITIONS
+admin = AdminClient({"bootstrap.servers": 'localhost:9092'})
+pizza_destroyed_topic = NewTopic("pizza-destroyed", num_partitions=2)
+topic_results = admin.create_topics([pizza_destroyed_topic])
+print(topic_results)
+# OUTPUT: {'pizza-ordered': <Future at 0x275b8ec2c90 state=running>}
+
+cluster_metadata = admin.list_topics()
+print(cluster_metadata.topics)
+
+PRODUCER.produce(
+            "pizza-destroyed",
+            key=order_id,
+            value=json.dumps(order_details).encode(),
+        )
+
+PRODUCER.flush()
+
+```
+
+* Errors
+  * The session is unavailable because no secret key was set. Set the secret_key on the application to something unique and secret.
+  * The method is not allowed for the requested URL. (because only GET request defined for that endpoint but tried doing a POST request to )
+  * TypeError: expected list of topic unicode strings , CONSUMER.subscribe("pizza-ordered") to 
+CONSUMER.subscribe(["pizza-ordered"])
+
+
+
+### Doubts
+1. What is diff bw event sourcing and SCD2?
+2. How does Kafka notify a consumer?
+3. What is long polling in Kafka?
+4. What is the need of consumer group in kafka? What if 1 consumer goes down?
+5. WHat is the difference bw fetching and polling in Kafka? (check 7)
+6. What is partition rebalancing and when is it useful?
+7. What is heartbeat in Kafka?
+8. What is kafka strimzi operator?
+9. What is replication factor?
+10. What is future?
+11. Why do we need consumer groups? (refer 14)
+12. Can consumer from different gorups read from same partition? (yes, refer 15)
+13. How to create multiple instances in google cloud platform/app engine multiple services?
+14. Why do we need to send message from a particular consumer to the same partition? In other words what is the use case of Kafka partion key?
+15. How important is it to preserve event order in a microservice based architecture?
+16. How to ensure data consistency in a microservice architecture?
+17. What is database per service pattern?
+18. What is Ray and how can it help create distributed consumer?
+19. Is it possible to create a kafka topic with dynamic partition count?
+
+### References
+1. https://stackoverflow.com/questions/52273832/how-to-push-notify-consumers-from-kafka-message-bus
+2. https://stackoverflow.com/questions/44239027/how-to-view-kafka-messages
+3. https://stackoverflow.com/questions/51760214/how-to-restart-docker-for-windows-process-in-powershell
+4. https://www.baeldung.com/kafka-commit-offsets
+5. https://stackoverflow.com/questions/37943372/kafka-consumer-poll-behaviour
+6. https://www.confluent.io/blog/kafka-producer-and-consumer-internals-4-consumer-fetch-requests
+7. https://learn.conduktor.io/kafka/kafka-consumer-important-settings-poll-and-internal-threads-behavior/
+8. https://quix.io/blog/kafka-auto-offset-reset-use-cases-and-pitfalls
+9. https://docs.confluent.io/platform/current/installation/configuration/consumer-configs.html
+10. https://newrelic.com/blog/best-practices/kafka-consumer-config-auto-commit-data-loss
+11. https://stackoverflow.com/questions/59291018/how-to-get-message-from-a-kafka-topic-with-a-specific-offset
+12. https://www.redpanda.com/guides/kafka-performance-kafka-rebalancing
+13. https://stackoverflow.com/questions/64441716/how-to-create-or-set-number-of-partitions-for-a-topic
+14. https://codingharbour.com/apache-kafka/what-is-a-consumer-group-in-kafka/
+15. https://stackoverflow.com/questions/35561110/can-multiple-kafka-consumers-read-same-message-from-the-partition
+16. https://blog.devgenius.io/preserving-event-order-in-a-microservices-based-architecture-7679723312aa
+17. https://stackoverflow.com/questions/75390937/what-is-the-need-of-consumer-group-in-kafka
+18. https://www.confluent.io/learn/kafka-partition-key
+19. https://github.com/ftisiot/flask-apache-kafka-demo/tree/main (https://www.youtube.com/watch?v=hfi_ALPlsOQ)
+20. https://medium.com/@jhansireddy007/how-to-parallelise-kafka-consumers-59c8b0bbc37a
+21. https://stackoverflow.com/questions/35437681/kafka-get-partition-count-for-a-topic
+22. https://stackoverflow.com/questions/32761598/is-it-possible-to-create-a-kafka-topic-with-dynamic-partition-count?rq=3
+23. https://stackoverflow.com/questions/64441716/how-to-create-or-set-number-of-partitions-for-a-topic
+24. https://www.youtube.com/watch?v=j1KQY33IqRc (The Python AdminClient Class)
+25. https://stackoverflow.com/questions/33677871/is-it-possible-to-add-partitions-to-an-existing-topic-in-kafka-0-8-2
+26. https://github.com/Sumanshu-Nankana/kafka-python (https://www.youtube.com/watch?v=gLMXVzEkahc)
+27. https://github.com/ifnesi/python-kafka-microservices/tree/main
+28. https://pandeyshikha075.medium.com/getting-started-with-confluent-kafka-in-python-579b708801e7
+
+
+
 ### Extras
 1. https://www.youtube.com/watch?v=RHwglGf_z40&t=1529s - Patroni
 2. https://www.youtube.com/watch?v=fvpq4jqtuZ8 - Connecting to database outside Kubernetes
 3. Check out Signoz 
-4. Review Day 8 Postgres manifest (configfile and persistentvolume)
+4. Check out - Best Practices for using Docker in Production
+ https://www.youtube.com/watch?v=8vXoMqWgbQQ&t=34s
+5. Implement different microservice architectures described here - https://redis.io/solutions/microservices/
