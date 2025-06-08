@@ -780,11 +780,12 @@ if __name__ == '__main__':
 
 * When the code `open('data/ece_curriculum_nitk.txt', "r")` within curriculum_tool.py is imported in main.py, Python searches for the text file w.r.t main.py directory i.e. current working directory
 
-* When the LLM decides to do a function call it does not actually call the functions, instead it just returns the name of the function. We have to then parse it and then call the function ourselves
+* When the LLM decides to do a function call it does not actually call the functions, instead it just returns the name of the function. We have to then parse it and then call the function ourselves. Therefore in the app.py, **there is separate code to handle the scenario when LLM decides that tool call is required (vs when LLM decides to directly return an output)**
 
 * The amazing thing about function call is the LLM is not only able to determine which function to call (tool_call.function.name), but it is also able to determine what values to pass to the function as arguments(tool_call.function.arguments)
 
 * Made a mistake of by defining type of "user_prompt" as number instead of string in the function definition, leading to incorrect result
+
 
 * Combined the curriculum tool with rest of the code. Entire code given below
 ```
@@ -1069,6 +1070,367 @@ build-backend = "poetry.masonry.api"
 1. If imported module use a data file in python, where does python search for data file?
 2. How to handle tool calls, since the reponse of tool call is not directly output but a tool call we have to process?
 
+## Day 10
+
+* Built a simple summarization app using Streamlit
+
+```
+import streamlit as st
+from openai import OpenAI
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+api_key = os.getenv("OPENAI_API_KEY")
+
+client = OpenAI(api_key=api_key)
+
+col1, col2 = st.columns(2)
+
+col1.subheader("Input")
+st_text = col1.text_area(
+    label="Enter text",
+    height=400,
+    key="text_input"
+)
+
+
+
+
+system_prompt = f"""
+You are an expert summarizer who has been given the following text
+
+Text : {st_text}
+
+Please create a concise summary. The summary should not exceed 30 words
+
+"""
+
+messages = [
+    {"role":"system", "content":system_prompt},
+    {"role":"user","content":st_text}
+]
+
+response = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    temperature=0.1,
+    messages=messages
+)
+
+output = response.choices[0].message.content
+
+print(output)
+
+col2.subheader("Output")
+col2.text_area(
+    label="Summarized version",
+    value=output,
+    height=400
+)
+
+
+```
+* Used the following variations of system prompts based on 1 and 4
+
+```
+
+system_prompt_1 = f"""
+As a professional summarizer, create a concise and comprehensive summary of the provided text, be it an article, post, conversation, or passage, while adhering to these guidelines:
+
+1. Craft a summary that is detailed, thorough, in-depth, and complex, while maintaining clarity and conciseness.
+2. Incorporate main ideas and essential information, eliminating extraneous language and focusing on critical aspects.
+3. Rely strictly on the provided text, without including external information.
+4. Format the summary in paragraph form for easy understanding. 
+
+Text : {st_text}
+"""
+
+system_prompt_2 = f"""
+
+Could you please provide a concise and comprehensive summary of the given text? The summary should capture the main points and key details of the text while conveying the author's intended meaning accurately. Please ensure that the summary is well-organized and easy to read, with clear headings and subheadings to guide the reader through each section. The length of the summary should be appropriate to capture the main points and key details of the text, without including unnecessary information or becoming overly long.
+
+Text : {st_text}
+
+
+"""
+
+
+system_prompt_3 = f"""
+
+Can you provide a comprehensive summary of the given text? The summary should cover all the key points and main ideas presented in the original text, while also condensing the information into a concise and easy-to-understand format. Please ensure that the summary includes relevant details and examples that support the main ideas, while avoiding any unnecessary information or repetition. The length of the summary should be appropriate for the length and complexity of the original text, providing a clear and accurate overview without omitting any important information.
+
+Text : {st_text}
+
+
+"""
+
+system_prompt_4 = f"""
+Could you please provide a summary of the given text, including all key points and supporting details? The summary should be comprehensive and accurately reflect the main message and arguments presented in the original text, while also being concise and easy to understand. To ensure accuracy, please read the text carefully and pay attention to any nuances or complexities in the language. Additionally, the summary should avoid any personal biases or interpretations and remain objective and factual throughout.
+
+
+Text : {st_text}
+
+"""
+
+system_prompt_5 = f"""
+
+Provide a comprehensive summary of the story so far. The summary should cover all the key points and main ideas presented in the original text, while also condensing the information into maximum concise form. Please ensure that the summary includes relevant details and examples that support the main ideas, while avoiding any unnecessary information or repetition. Make length less than 50 words, providing a clear and accurate overview without omitting any important information. While condensing absolutely as much as possible. Use the following rules. Remove articles (a, an, the) when they're not essential to the meaning of the sentence. Eliminate unnecessary prepositions (e.g., "in," "on," "at") when the context is clear without them. Avoid redundant or repetitive words and phrases that do not add new information. Use contractions (e.g., "don't" instead of "do not") to reduce word count. Simplify verb tenses when possible (e.g., use simple past instead of past perfect). Replace longer phrases with shorter synonyms or more concise expressions. Omit unnecessary modifiers, such as adverbs and adjectives, that do not significantly contribute to the meaning. Avoid conjunctions (e.g., "and," "but," "or") when the relationship between ideas is implied. Eliminate filler words and phrases (e.g., "basically," "in fact," "as a matter of fact") that do not add value to the sentence. Use sentence fragments, concise sentence structures, single words where meaning is inferable.
+
+Text : {st_text}
+
+
+"""
+
+system_prompt_6 = f"""
+
+Task: Summarize the following consumer complaint in 2-3 sentences.
+
+Instructions:
+1. Identify the main issue or dispute raised by the sender.
+2. Note any legal references (e.g., Fair Credit Reporting Act).
+3. Briefly list the specific accounts or items being challenged.
+4. Mention the actions requested (e.g., investigation, correction, report update).
+5. Use a neutral and professional tone. Do not include personally identifiable information (e.g., name, account numbers, addresses).
+
+Consumer complaint : {st_text}
+
+
+"""
+```
+
+* The idea is the model needs clear guidelines about what is expected out of a "summary" (although it seems like the guidelines are redundant). Hence it's best to define exactly what you want, by giving it a 
+    * a role  (As a <ROLE> or You are an expert <ROLE>)
+    * a task (if the task is complex, split it into subtasks i.e. instruction list)
+    * a format
+    * along with a purpose.
+ Specifying how exactly you want the input to be generated, and why, cuts down significantly on the overall clutter, and generally increases the efficiency of its summaries.
+
+* When you ask a model to summarize within a certain number of words, there is a chance it will cut out / skip over essential information or even include statements not in the original text
+
+* Another trick to develop good prompts is : You can collaborate with ChatGPT to develop prompts.
+
+* Another approach is MAp-Reduce approach : Divide entire content into chunks, summarize each chunk separately and then make a summary of all the individual chunk summaries
+
+
+
+## Doubts
+1. What are some ways to write effective prompts?
+
+
+### References
+1. https://www.reddit.com/r/ChatGPTPro/comments/13n55w7/highly_efficient_prompt_for_summarizing_gpt4/
+2. https://www.promptingguide.ai/introduction/tips
+3. https://github.com/microsoft/presidio/tree/main/docs/samples/python/streamlit
+4. https://www.reddit.com/r/ChatGPT/comments/11twe7z/prompt_to_summarize/
+5. https://www.reddit.com/r/SillyTavernAI/comments/1budovw/good_brief_accurate_summarization_prompt_for/
+6. https://www.reddit.com/r/ChatGPTPro/comments/14c9vx2/what_is_the_best_way_to_get_start_writing_prompts/
+7. https://www.reddit.com/r/ChatGPTPromptGenius/comments/1kl332l/how_do_you_find_the_best_prompts/
+8. https://github.com/NirDiamant/Prompt_Engineering
+
+
+## Day 11
+
+* RAG : A framework/technique LLM uses to get relevant, up-to-date, and context-specific information by combining retrieval and generation capabilities.
+
+* The core idea behind RAG is
+    1. Given a bunch of text, an LLM can answer questions based on that text (generation)
+    2. When we have a huge amount of text, it is more efficient to divide it into smaller chunks and feed only the relevant chunks to the LLM (retrieval)
+
+* RAG will be relevant even if models can reason over super long context lengths. RAG is necessary because models can’t be trained on new information as quickly as the information can be indexed and subsequently retrieved. Furthermore, a model can't "know" real time data (weather, traffic, stocks, whatever) without retrieving it. 
+
+* Another reason RAG will be relevant is using long context is very expensive
+
+* We can view tool use as a form of RAG or vice versa i.e. RAG is essentially a type of tool/function call
+
+* Stages in traditional RAG:
+    * Query expansion 
+    * Retrieval
+    * Reranking (using tools like cross encoder, colbert)
+    * Context enrichment (i.e. augmentation)
+    * Generation
+
+* Query expansion increases the number of results, so it increases recall (vs precision). In general, BM25 favors precision while embedding retrieval favors recall
+
+* Recall : In NLP tasks, recall is used to measure how many of the positive instances were correctly identified by the model
+
+* Precision : In NLP tasks, precision is used to measure how many of the instances identified as positive are actually positive.
+
+* PREcision is to PREgnancy tests as reCALL is to CALL center (refer 3)
+
+* Traditional RAG vs Agentic RAG : In traditional RAG, we retrieve the relevant documents once and feed it as context to the llm. In Agentic rag, the agent can do the retrieval process iteratively as many times as required until the relevant documents are retrieved, and then feed that as context. 
+
+### Doubts
+1. Why does BM25 favour precision, and embedding retrieval favour recall?
+2. Are precision and recall always inversely proportional?
+3. How exactly does an Agentic RAG improve its retrieval in successive iterations?
+
+### References
+1. https://www.reddit.com/r/LocalLLaMA/comments/1eg8v5b/rag_tools_and_agents_will_all_soon_be_irrelevant/
+2. https://jaimin-ml2001.medium.com/evaluation-methods-in-natural-language-processing-nlp-part-1-ffd39c90c04f
+3. https://datascience.stackexchange.com/questions/30881/when-is-precision-more-important-over-recall
+4. https://haystack.deepset.ai/blog/query-expansion
+5. https://langchain-ai.github.io/langgraph/tutorials/rag/langgraph_agentic_rag/
+6. https://www.moveworks.com/us/en/resources/blog/agentic-rag
+7. https://github.com/langchain-ai/langchain-community/tree/main/libs/community/langchain_community
+8. https://langchain-ai.github.io/langgraph/tutorials/rag/langgraph_agentic_rag
+
+## Day 12
+
+* Goal : To create a pipeline which parses pdf, extracts relevant content as json, and put all of that json into excel
+
+* Wrote code to 
+    * Convert pdf to markdown using docling
+    * Extract name and skills from markdown using Llama-3.3-70b (groq inferencing)
+    * Convert the json to structured format using Pandas
+```
+# pip install docling groq
+
+import json
+import pandas as pd
+from groq import Groq
+from docling.document_converter import DocumentConverter
+
+source = "/content/London-Resume-Template-Professional.pdf"
+
+# Extract content from resume 
+converter = DocumentConverter()
+doc = converter.convert(source).document
+print(doc.export_to_markdown())
+resume = doc.export_to_markdown()
+
+# Pass markdown to LLM and get relevant details as json
+
+client = Groq(api_key="")
+user_prompt = f"""
+You are an expert in parsing relevant details from resumes. Given a resume, you extract the name and skills of the person 
+
+Resume : {resume}
+
+Respond in the json format shown below
+{{
+ "name" :  <string>
+ "skills" : [<list of string>]
+}}
+"""
+
+messages = [
+{"role":"user", "content": user_prompt}
+]
+
+
+response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=messages,
+        temperature=0,
+)
+
+
+content = response.choices[0].message.content
+json_content = content[content.find('{'):content.find('}') + 1]
+
+person_details = json.loads(json_content)
+
+person_details_df = pd.DataFrame.from_dict(person_details)
+
+```
+
+
+* Was getting error while parsing json because I had not parsed the closing bracket of json, added +1 so that it is resolved
+
+### Doubts
+1. What GPU (for PC) or config would be the minimum to run something like qwen 2.5 32B smoothly?
+
+### References
+1. https://www.reddit.com/r/LocalLLaMA/comments/1gp4g8a/hardware_requirements_to_run_qwen_25_32b/
+2. https://www.resumeviking.com/templates/
+3. https://www.youtube.com/watch?v=B5XD-qpL0FU (Venelin Valkov)
+4. https://www.reddit.com/r/LocalLLaMA/comments/1dhyxq8/why_use_ollama/
+5. https://www.reddit.com/r/ollama/comments/1giu0kz/post_your_model_what_do_you_have_and_use/
+6. https://www.reddit.com/r/LLMDevs/comments/1gvymbp/what_is_the_best_open_source_llm_for_analyzing/
+7. https://colab.research.google.com/#fileId=https%3A//huggingface.co/Qwen/Qwen2.5-VL-32B-Instruct.ipynb
+8. https://www.reddit.com/r/LocalLLaMA/comments/1hd3mfa/best_vlm_in_the_market/
+
+## Day 13
+
+* Goal : To build a RAG pipeline for FAQ
+
+* Built a RAG pipeline with following stages
+    * Chunked the text file using langchain RecursiveCharacterTextSplitter
+    * Add chunks to ChromaDB collection
+    * (add remaining points)
+    
+
+```
+import chromadb
+
+from chromadbx import UUIDGenerator
+from groq import Groq
+from langchain.text_splitter import RecursiveCharacterTextSplitter 
+
+
+with open("/content/data_engineer_zoomcamp_faq.txt","r") as file:
+  doc = file.read()
+
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=300, # Size of each chunk in characters
+    chunk_overlap=100, # Overlap between consecutive chunks
+    length_function=len, # Function to compute the length of the text
+    add_start_index=True, # Flag to add start index to each chunk
+  )
+
+chunks = text_splitter.split_text(doc)
+
+client = chromadb.PersistentClient()
+collection = client.get_or_create_collection(name="test")
+
+collection.add(documents=chunks, ids=UUIDGenerator(len(chunks)))
+
+query = "Which Python version can we use?"
+
+results = collection.query(
+    query_texts=[query],
+    n_results=2
+).get('documents')[0]
+
+content_text = "\n\n".join(results)
+
+client = Groq(api_key="")
+
+user_prompt = f"""
+Answer the question using following context:
+{content_text}
+ - -
+Answer the question based on the above context: {question}
+"""
+
+messages = [
+{"role":"user", "content": user_prompt}
+]
+
+response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=messages,
+        temperature=0,
+)
+
+print(response.choices[0].message.content)
+```
+
+* 
+
+### Doubts
+
+### References
+1. https://stackoverflow.com/questions/78486966/langchaing-text-splitter-docs-saving-issue
+2. https://research.trychroma.com/evaluating-chunking
+3. https://cookbook.chromadb.dev/core/document-ids/
+4. https://docs.trychroma.com/docs/overview/getting-started
+5. https://docs.google.com/document/d/19bnYs80DwuUimHM65UV3sylsCn2j1vziPOwzBwQrebw/edit?tab=t.0
+6. https://medium.com/@callumjmac/implementing-rag-in-langchain-with-chroma-a-step-by-step-guide-16fc21815339
+
+
+
 ## Exercise
 1. Connect to LLM
 2. Build a multi turn LLM call
@@ -1079,3 +1441,4 @@ build-backend = "poetry.masonry.api"
 7. https://www.reddit.com/r/LocalLLaMA/comments/1ftjbz3/shockingly_good_superintelligent_summarization/
 8. https://huggingface.co/DeepMostInnovations/sales-conversion-model-reinf-learning
 9. https://www.reddit.com/r/SaaS/comments/1hrv2o5/elevenlabs_and_murfai_are_making_millions_with/
+
