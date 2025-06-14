@@ -1258,7 +1258,7 @@ Consumer complaint : {st_text}
 
 * PREcision is to PREgnancy tests as reCALL is to CALL center (refer 3)
 
-* Traditional RAG vs Agentic RAG : In traditional RAG, we retrieve the relevant documents once and feed it as context to the llm. In Agentic rag, the agent can do the retrieval process iteratively as many times as required until the relevant documents are retrieved, and then feed that as context. 
+* Traditional RAG vs Agentic RAG : In traditional RAG, we retrieve the relevant documents once and feed it as context to the llm. In Agentic rag, the agent can do the retrieval process iteratively as many times as required until the relevant documents are retrieved, and then feed that as context (iterative context refinement) 
 
 ### Doubts
 1. Why does BM25 favour precision, and embedding retrieval favour recall?
@@ -1356,12 +1356,20 @@ person_details_df = pd.DataFrame.from_dict(person_details)
 * Goal : To build a RAG pipeline for FAQ
 
 * Built a RAG pipeline with following stages
-    * Chunked the text file using langchain RecursiveCharacterTextSplitter
-    * Add chunks to ChromaDB collection
-    * (add remaining points)
-    
+    * Ingestion/Preprocessing
+        * Chunked the text file using langchain RecursiveCharacterTextSplitter
+        * Add chunks to ChromaDB collection with a unique UUID for each chunk
+    * Retreival
+        * Find chunks relevant to the user query 
+        * Relevant chunks are joined together and passed as context to the LLM, which uses it to answer the user's query
+   
+
+* Chroma converts the text into the embeddings using all-MiniLM-L6-v2, a sentence transformer model
+
+* Chroma db uses cosine similarity as the similarity metric
 
 ```
+! pip install langchain chromadb chromadbx groq
 import chromadb
 
 from chromadbx import UUIDGenerator
@@ -1417,7 +1425,7 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-* 
+* Used split_text instead of split_document
 
 ### Doubts
 
@@ -1428,7 +1436,238 @@ print(response.choices[0].message.content)
 4. https://docs.trychroma.com/docs/overview/getting-started
 5. https://docs.google.com/document/d/19bnYs80DwuUimHM65UV3sylsCn2j1vziPOwzBwQrebw/edit?tab=t.0
 6. https://medium.com/@callumjmac/implementing-rag-in-langchain-with-chroma-a-step-by-step-guide-16fc21815339
+7. https://www.datacamp.com/tutorial/chromadb-tutorial-step-by-step-guide
 
+
+
+## Day 14 and 15
+
+* Types of chunking strategies
+    * Fixed length chunking
+    * Recursive chunking
+    * Document based chunking
+    * Semantic chunking
+    * Agentic chunking (using LLM to suggest chunks)
+
+
+* Goal : To build a full RAG pipeline of a pdf document containing images
+
+* Docling Force Full Page OCR : When you set `do_ocr=True`, OCR is not triggered unless there is an actual bitmap resource element. BY using Force Full Page OCR, we force a full page OCR even if not actual bitmap resource element is found. In a way, this is similar to converting the entire page into an image and doing an OCR on that (refer source code below)
+
+```
+# Soure code from https://github.com/docling-project/docling/pull/290/files#diff-90f1f740c73d9ee1f1b821ff4937a7016fa32b30faa91fedf034e6f3663b9c62
+# We set bounding box on entire page
+
+ if self.options.force_full_page_ocr or coverage > max(
+            BITMAP_COVERAGE_TRESHOLD, self.options.bitmap_area_threshold
+        ):
+            return [
+                BoundingBox(
+                    l=0,
+                    t=0,
+                    r=page.size.width,
+                    b=page.size.height,
+                    coord_origin=CoordOrigin.TOPLEFT,
+                )
+            ]
+
+
+```
+
+
+* Docling PdfPipeline Images Scale : For operating with page images, we must keep them, otherwise the DocumentConverter will destroy them for cleaning up memory. This is done by setting PdfPipelineOptions.images_scale, which also defines the scale of images. scale=1 correspond to a standard 72 DPI image
+
+* DPI (dots per inch) in image refers to the resolution of an image when it is printed. A higher DPI means more dots of ink per inch, resulting in a sharper and more detailed print. 72 DPI has been a standard screen resolution used in early computer monitors. For print-quality images, a resolution of 300 DPI or higher is considered high resolution.
+
+* Data URI (Uniform Resource Identifier) : a scheme that allows data to be encoded into a string (and then embedded in html and css)
+Syntax of data URIs is : data:content/type;base64, For a image stored in URI it would `data:image/png;base64,iVBORw0KGgoAAAANSUh....`. Basically the image pixels is stored in the form of base64, and it starts after the comma in the URI scheme
+ 
+
+* Tried extracting text from pdf using docling
+    * Approach 1: Use default pipeline
+    * Approach 2: Enable ocr (no improvement - text on LHS not covered)
+    * Approach 3: Enable ocr with force full page ocr using Tesseract ocr (significant improvment)
+
+
+```
+### Approach 1
+from docling.document_converter import DocumentConverter
+source = "/content/Fact-Sheet-X-Rays-June-2022.pdf"
+converter = DocumentConverter()
+doc = converter.convert(source).document
+print(doc.export_to_markdown())
+
+### Approach 2
+from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
+from docling.datamodel.base_models import InputFormat
+from docling.document_converter import DocumentConverter, PdfFormatOption
+
+source = "/content/Fact-Sheet-X-Rays-June-2022.pdf"
+
+pipeline_options = PdfPipelineOptions()
+pipeline_options.do_ocr = True
+
+doc_converter = DocumentConverter(format_options = {
+  InputFormat.PDF : PdfFormatOption(pipeline_options=pipeline_options)   
+}
+)
+
+doc = doc_converter.convert(source).document
+print(doc.export_to_markdown())
+
+
+
+### Approach 3
+from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
+from docling.datamodel.base_models import InputFormat
+from docling.document_converter import DocumentConverter, PdfFormatOption
+
+source = "/content/Fact-Sheet-X-Rays-June-2022.pdf"
+
+ocr_options = TesseractCliOcrOptions(force_full_page_ocr=True)
+
+pipeline_options = PdfPipelineOptions()
+pipeline_options.do_ocr = True
+pipeline_options.ocr_options = ocr_options
+
+doc_converter = DocumentConverter(format_options = {
+  InputFormat.PDF : PdfFormatOption(pipeline_options=pipeline_options)   
+}
+)
+
+doc = doc_converter.convert(source).document
+
+
+```
+
+* Images are typically binary files, but LLMs often require text-based input. Base64 encoding converts the binary image data into a string of ASCII characters. Hence we need to first encode our image to a base64 format string before passing it to model
+
+* llama-3.3-70b-versatile is a text only model, cannot use it to summarize messages
+
+* llama-4-scout-17b-16e-instruct can do both image understanding/visual reasoning and also assistant like chat
+
+* Wrote code to extract text and images from pdf and summarize
+
+```
+
+from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
+from docling.datamodel.base_models import InputFormat
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling_core.types.doc import PictureItem
+from pathlib import Path
+IMAGE_RESOLUTION_SCALE = 2.0
+
+source = "/content/Fact-Sheet-X-Rays-June-2022.pdf"
+
+pipeline_options = PdfPipelineOptions()
+pipeline_options.images_scale = IMAGE_RESOLUTION_SCALE
+pipeline_options.generate_page_images = True
+pipeline_options.generate_picture_images = True
+pipeline_options.do_ocr = True
+ocr_options = TesseractCliOcrOptions(force_full_page_ocr=True)
+pipeline_options.ocr_options = ocr_options
+
+doc_converter = DocumentConverter(format_options = {
+  InputFormat.PDF : PdfFormatOption(pipeline_options=pipeline_options)
+}
+)
+
+# Convert document
+doc = doc_converter.convert(source)
+
+doc_filename = doc.input.file.stem
+
+
+for page_no, page in doc.document.pages.items():
+  page_image_filename = Path(f"{doc_filename}-{page_no}.png")
+  with page_image_filename.open("wb") as fp:
+    page.image.pil_image.save(fp, format="PNG")
+
+picture_counter = 0
+for element, _level in doc.document.iterate_items():
+  if isinstance(element, PictureItem):
+    picture_path = Path(f"{doc_filename}-picture-{picture_counter}.png")
+    with picture_path.open("wb") as fp:
+      element.get_image(doc.document).save(fp, "PNG")
+
+    picture_counter += 1
+
+images = []
+for picture in doc.document.pictures:
+  ref = picture.get_ref().cref
+  image = picture.image
+  if image:
+    images.append(str(image.uri))
+
+print(images[0])
+
+from groq import Groq
+
+client = Groq(api_key="")
+
+
+image_summarization_prompt = """
+Describe the image in concisely in 1 to 2 sentences 
+"""
+
+image_summaries = []
+
+image = images[0]
+
+# messages = [
+#     {"role":"user", "content":image},
+#     {"role":"system", "content":image_summarization_prompt},
+# ]
+
+messages=[
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Describe the image concisely in 1 to 2 sentences"
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": image
+                    }
+                }
+            ]
+        }
+    ]
+
+response = client.chat.completions.create(
+    model="meta-llama/llama-4-scout-17b-16e-instruct",
+    messages=messages,
+    temperature=0.5
+)
+
+summary = response.choices[0].message.content
+print(summary)
+
+```
+
+
+### Doubts
+1. How to ask llm to summarize base64 images?
+2. What does instruction tuning mean?
+3. What does having an list of user prompts in the llm call mean?
+
+
+### References
+1. https://medium.com/@anuragmishra_27746/five-levels-of-chunking-strategies-in-rag-notes-from-gregs-video-7b735895694d
+2. https://github.com/docling-project/docling/issues/185
+3. https://www.nibib.nih.gov/sites/default/files/2022-09/Fact-Sheet-X-Rays-June-2022.pdf
+4. https://stackoverflow.com/questions/19696418/what-does-it-means-dataimage-png-in-the-source-of-an-image
+5. https://base64.guru/converter/decode/image
+6. https://medium.com/@martin.crabtree/the-what-and-when-of-a-data-uri-599fe72f90d8
+7. https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct
+8. https://medium.com/@pritigupta.ds/docling-powered-rag-querying-over-complex-pdfs-d99f5f58bc33
+9. https://console.groq.com/docs/vision
+
+## To explore
+1. Different types of RAG - https://www.linkedin.com/posts/pavan-belagatti_the-essential-rag-approaches-every-aiml-activity-7318683180134199296-fb_0
 
 
 ## Exercise
