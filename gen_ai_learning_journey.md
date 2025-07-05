@@ -1669,6 +1669,142 @@ print(summary)
 ## To explore
 1. Different types of RAG - https://www.linkedin.com/posts/pavan-belagatti_the-essential-rag-approaches-every-aiml-activity-7318683180134199296-fb_0
 
+## Day 16
+
+* "in" operator in Python cares only about presence, not the number of occurrences.
+* replace function : all occurrences of the specified phrase will be replaced, if nothing else is specified.
+
+```
+
+from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
+from docling.datamodel.base_models import InputFormat
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling_core.types.doc import PictureItem
+from pathlib import Path
+IMAGE_RESOLUTION_SCALE = 2.0
+
+source = "/content/Fact-Sheet-X-Rays-June-2022.pdf"
+
+pipeline_options = PdfPipelineOptions()
+pipeline_options.images_scale = IMAGE_RESOLUTION_SCALE
+pipeline_options.generate_page_images = True
+pipeline_options.generate_picture_images = True
+pipeline_options.do_ocr = True
+ocr_options = TesseractCliOcrOptions(force_full_page_ocr=True)
+pipeline_options.ocr_options = ocr_options
+
+doc_converter = DocumentConverter(format_options = {
+  InputFormat.PDF : PdfFormatOption(pipeline_options=pipeline_options)
+}
+)
+
+# Convert document
+doc = doc_converter.convert(source)
+
+doc_filename = doc.input.file.stem
+
+
+for page_no, page in doc.document.pages.items():
+  page_image_filename = Path(f"{doc_filename}-{page_no}.png")
+  with page_image_filename.open("wb") as fp:
+    page.image.pil_image.save(fp, format="PNG")
+
+picture_counter = 0
+for element, _level in doc.document.iterate_items():
+  if isinstance(element, PictureItem):
+    picture_path = Path(f"{doc_filename}-picture-{picture_counter}.png")
+    with picture_path.open("wb") as fp:
+      element.get_image(doc.document).save(fp, "PNG")
+
+    picture_counter += 1
+
+images = []
+for picture in doc.document.pictures:
+  ref = picture.get_ref().cref
+  image = picture.image
+  if image:
+    images.append(str(image.uri))
+
+print(images[0])
+
+from groq import Groq
+
+client = Groq(api_key="")
+
+
+image_summarization_prompt = """
+Describe the image concisely in 1 to 2 sentences
+"""
+
+image_summaries = []
+
+image = images[0]
+
+# messages = [
+#     {"role":"user", "content":image},
+#     {"role":"system", "content":image_summarization_prompt},
+# ]
+
+for image in images:
+  messages=[
+          {
+              "role": "user",
+              "content": [
+                  {
+                      "type": "text",
+                      "text": "Describe the image concisely in 1 to 2 sentences"
+                  },
+                  {
+                      "type": "image_url",
+                      "image_url": {
+                          "url": image
+                      }
+                  }
+              ]
+          }
+      ]
+
+  response = client.chat.completions.create(
+      model="meta-llama/llama-4-scout-17b-16e-instruct",
+      messages=messages,
+      temperature=0.5
+  )
+  summary = response.choices[0].message.content
+
+  image_summaries.append(summary)
+
+
+def replace_occurences(text, replacements):
+  result = text
+
+
+  IMAGE_PLACEHOLDER = "<!-- image_placeholder -->"
+
+  for replacement in replacements:
+    if IMAGE_PLACEHOLDER in result:
+      result = result.replace(IMAGE_PLACEHOLDER, replacement, 1)
+    else:
+      break
+
+  return result
+
+replace_occurences(doc.document, image_summaries)
+
+
+
+
+
+
+```
+
+*
+
+
+1. When replacing images with corresponding text description, how to make sure that the text is placed in the right location?
+2. Does the replace() function in Python replace first occurence or all occurences of matching string?
+
+
+1. https://www.w3schools.com/python/ref_string_replace.asp
 
 ## Exercise
 1. Connect to LLM
@@ -1681,3 +1817,471 @@ print(summary)
 8. https://huggingface.co/DeepMostInnovations/sales-conversion-model-reinf-learning
 9. https://www.reddit.com/r/SaaS/comments/1hrv2o5/elevenlabs_and_murfai_are_making_millions_with/
 
+
+## Day 17 to 18
+
+* Moved code from Google colab to local
+
+* To measure time you use use the simple code snippet below
+```
+import time
+
+start = time.time()
+print("hello")
+end = time.time()
+print(end - start)
+
+```
+
+* Finished first version of RAG pipeline using docling (Created by own sample pdf for testing)
+    * Chunking strategy is each section is broken into separate chunk
+
+```
+
+import pickle
+import chromadb
+import time
+
+from pathlib import Path
+from groq import Groq
+from docling.datamodel.pipeline_options import PdfPipelineOptions, EasyOcrOptions, TesseractCliOcrOptions
+from docling.datamodel.base_models import InputFormat
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling_core.types.doc import PictureItem
+from chromadbx import UUIDGenerator
+
+
+IMAGE_RESOLUTION_SCALE = 2.0
+
+source = "Penguins.pdf"
+
+
+def parse_docs():
+    pipeline_options = PdfPipelineOptions()
+    doc_converter = DocumentConverter(format_options = {
+    InputFormat.PDF : PdfFormatOption(pipeline_options=pipeline_options)
+    }
+    )
+
+    # Convert document
+    doc = doc_converter.convert(source)
+    doc_filename = doc.input.file.stem
+    
+    return doc.document
+
+
+
+def summarize_images(images):
+
+    client = Groq(api_key="")
+
+    image_summarization_prompt = """
+    Describe the image concisely in 1 to 2 sentences
+    """
+
+    image_summaries = []
+
+    image = images[0]
+
+    for image in images:
+        messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": image_summarization_prompt
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": image
+                            }
+                        }
+                    ]
+                }
+            ]
+
+        response = client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=messages,
+            temperature=0.5
+        )
+        summary = response.choices[0].message.content
+
+        image_summaries.append(summary)
+
+
+def replace_occurences(text, replacements):
+    result = text
+
+    IMAGE_PLACEHOLDER = "<!-- image_placeholder -->"
+
+    for replacement in replacements:
+        if IMAGE_PLACEHOLDER in result:
+            result = result.replace(IMAGE_PLACEHOLDER, replacement, 1)
+        else:
+            break
+
+    return result
+
+
+
+def chunk_document(text):
+    SPLIT_PATTERN = "\n#"
+    chunks = text.split(SPLIT_PATTERN)
+
+    return chunks
+
+start = time.time()
+text = parse_docs()
+text = text.export_to_markdown()
+print(text)
+end = time.time()
+print("Time taken ", (end-start))
+chunks = chunk_document(text)
+print(len(chunks))
+client = chromadb.PersistentClient()
+collection = client.get_or_create_collection(name="test")
+collection.add(documents=chunks, ids=UUIDGenerator(len(chunks)))
+query = "What is the height of penguins"
+result = collection.query(
+    query_texts=[query],
+    n_results=1,
+).get('documents')[0]
+
+print(result)
+user_prompt = f"""
+Answer the question using following context:
+{result}
+- -
+Answer the question based on the above context: {query}
+"""
+
+messages = [
+{"role":"user", "content": user_prompt}
+]
+client = Groq(api_key="")
+
+response = client.chat.completions.create(
+    model="llama-3.3-70b-versatile",
+    messages=messages,
+    temperature=0,
+)
+
+print(response.choices[0].message.content)
+
+```
+
+
+* Errors:
+    * Unknown metadata version: 2.4, Solution : Upgrade poetry. Easiest way to upgrade Poetry is to reinstall. Typed following in Windows Powershell `(Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | py -`
+    * RuntimeError: Tesseract is not available, aborting: [WinError 2] The system cannot find the file specified Install tesseract on your system and the tesseract binary is discoverable. The actual command for Tesseract can be specified in `pipeline_options.ocr_options.tesseract_cmd='tesseract'`. Alternatively, Docling has support for other OCR engines. See the documentation.
+    * TypeError: Descriptors cannot be created directly. Protocol Buffer error. To solve this I set the environment variable for the virtual environment as PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python. In the end of venv\Scripts\activate.bat added `@set "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python"` (refer 5)
+    * chromadbx requires Python <3.13,>=3.9, so it will not be installable for Python >=3.13,<4.0, Solution: Updated pyproject.toml file accordingly
+
+### Doubts
+1. How to reinstall/upgrade Poetry in Windows?
+2. Tesseract vs EasyOcr vs RapidOcr - what are the differences?
+3. How to store a Python object so that it can be reused for the next program run?
+4. How to set an environment variable in a virtual environment?
+
+### References
+1. https://github.com/python-poetry/poetry/issues/9885
+2. https://pipx.pypa.io/stable/how-pipx-works/
+3. https://stackoverflow.com/questions/62274252/how-can-i-make-a-python-program-so-that-even-after-termination-the-variable-li
+4. https://stackoverflow.com/questions/50951955/pytesseract-tesseractnotfound-error-tesseract-is-not-installed-or-its-not-i
+5. https://stackoverflow.com/questions/9554087/setting-an-environment-variable-in-virtualenv
+
+
+## Day 19
+
+* uuid (Universally Unique Identifier) :  A 128-bit number used to uniquely identify information in computer systems (such as database row, session state). Represented as a 36-character string with five groups of hexadecimal digits separated by hyphens eg. a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11 (8-4-4-4-12 hexadecimal i.e. standard format)
+
+* uuid are globally unique, hence the name
+
+* tempfile library creates a temporary folder in `C:\Users\dell\AppData\Local\Temp`
+
+* Created the following Streamlit app with code below
+```
+import streamlit as st
+import tempfile
+import base64
+import uuid
+import gc
+import time
+import os
+
+from rag import *
+
+if "id" not in st.session_state:
+    st.session_state.id = uuid.uuid4()
+    st.session_state.file_cache = {}
+
+session_id = st.session_state.id
+
+
+def reset_chat():
+    st.session_state.messages = []
+    st.session_state.context = None
+    gc.collect()
+
+# Function to display the uploaded PDF in the app
+def display_pdf(file):
+    st.markdown("### 📄 PDF Preview")
+    base64_pdf = base64.b64encode(file.read()).decode("utf-8")
+    pdf_display = f"""<iframe src="data:application/pdf;base64,{base64_pdf}" width="500" height="100%" type="application/pdf"
+                        style="height:100vh; width:100%"
+                    >
+                    </iframe>"""
+    st.markdown(pdf_display, unsafe_allow_html=True)
+
+
+# Sidebar: Upload Document
+with st.sidebar:
+    st.markdown("<h1 style='text-align: center;'>🤖  Multimodal RAG - Query your document</h1>", unsafe_allow_html=True)
+    st.header("Upload your PDF")
+    uploaded_file = st.file_uploader("", type="pdf")
+    
+
+    if uploaded_file:
+        file_key = f"{session_id}-{uploaded_file.name}"
+        if file_key not in st.session_state.file_cache:
+            status_placeholder = st.empty()
+            status_placeholder.info("📥 File uploaded successfully")
+        
+            time.sleep(2.5)  # Delay before switching message
+        
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Save uploaded file to temp dir
+                file_path = os.path.join(temp_dir, uploaded_file.name)
+                print(f"Temporary file path: {file_path}")       
+                with open(file_path, "wb") as f:
+                    f.write(uploaded_file.getvalue())
+
+                # Convert pdf to markdown
+                status_placeholder.info("Identifying document layout...")
+                progress_bar = st.progress(10)
+                start = time.time()
+                text = parse_docs(file_path)
+                text = text.export_to_markdown()
+                st.session_state.markdown_text = text
+                end = time.time()
+                print("Time taken ", (end-start))
+
+                # Chunk document
+                status_placeholder.info("Generating embeddings...")                    
+                chunks = chunk_document(text)
+                st.session_state.chunks = chunks                
+                progress_bar.progress(50)
+
+                # Load chunks into vectorstore
+                status_placeholder.info("Indexing the document...")
+                progress_bar.progress(80)
+                collection = create_vectorstore(chunks, collection_name="penguins")
+                st.session_state.collection = collection
+                
+                # Show pdf upload status as completed
+                status_placeholder = st.empty()
+                st.success("Ready to Chat...")
+                progress_bar.progress(100)
+                st.session_state.file_cache[file_key] = True
+
+            
+col1, col2 = st.columns([6, 1])
+
+with col2:
+    st.button("Clear ↺", on_click=reset_chat)
+
+# Initialize chat history
+if "messages" not in st.session_state:
+    reset_chat()
+
+
+# Show message history (preserved across reruns)
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Accept user query
+if prompt := st.chat_input("Ask a question..."):
+
+    # Store and display user message
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Generate RAG-based response
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+    
+        with st.spinner("Thinking..."):
+        
+            collection = st.session_state.get("collection")
+            relevant_chunks = retrieve_relevant_chunks(query=prompt, collection=collection)
+            response_text = generate_response(prompt, relevant_chunks)
+            message_placeholder.markdown(response_text)
+            
+
+    # Store assistant response
+    st.session_state.messages.append({"role": "assistant", "content": response_text})
+
+
+```
+
+
+*Errors
+    * `label` got an empty value. This is discouraged for accessibility reasons and may be disallowed in the future by raising an exception. Please provide a non-empty label and hide it with label_visibility if needed.
+    * RuntimeError: Tried to instantiate class '__path__._path', but it does not exist! Ensure that it is registered via torch::class_
+    * Not able to stop by just using Ctrl+C. Have to type Ctrl+C, then close streamlit, then open the url, only then app stops running
+
+### Doubts
+
+
+### References
+1. https://www.cockroachlabs.com/blog/what-is-a-uuid/
+
+
+
+## Day 20
+
+* Learnt fundamentals of ElasticSearch
+
+* Elasticsearch's full-text search requires minimal computational resources (can run on CPU) compared to GPU-intensive vector operations, hence cost effective
+
+* Hybrid search : Full text search + Vector search
+
+* Steps involved in full text seatch
+    1. Text preprocessing (including stemming, lower case, stopword elimination)
+    2. Inverted Index creation
+    3. Query processing 
+    4. Relevance scoring (using BM25 algorithm to find similar docs)
+
+
+* Elasticsearch Analyzer : Wrapper around 3 functions
+    * Character filter (add/modify/remove characters, for example remove html tags)
+    * Tokenizer (split doc into tokens)
+    * Token filter (processes the tokens like lowercase, removing stopword tokens)
+
+* Query is processed using Query analyzer
+
+* Encoder-decoder model : Type of neural network architecture used for sequential data processing and generation i.e. both input and output are sequences
+    * Encoder : Converts entire input data into a single fixed size vector, called context vector
+    * Decoder : Takes context vector and produces the output one step at a time
+
+* Encoder-decoder model can be implemented using RNN, LSTM or Transformers. 
+
+* Transformers are indirect descendants of the previous RNN models. The problem with RNN was since entire input was compressed into a single context vector, it was an information bottleneck as we are trying to squeeze it all through a single connection. The attention mechanism provided a solution to the bottleneck issue.
+
+* Cross Encoder : Produces very accurate results for similarity scores. A cross-encoder processes both inputs jointly, allowing full attention between all tokens in both sequences.
+
+* Sparse Encoding Model : A class of neural retrieval models that represent text using sparse vector representations, as opposed to dense ones (like BERT embeddings). They aim to combine the interpretability and efficiency of traditional sparse methods (like BM25) with the semantic power of neural models.
+
+* Sentence Transformer : Type of deep learning model designed to convert sentences into numerical vectors (embeddings) that capture the semantic meaning of the text.
+
+* ELSER model used by ElasticSearch is not an open source model.
+
+* Index template : a way to tell Elasticsearch how to configure an index when it the index created. Index templates define settings, mappings, and aliases that can be applied automatically to new indices.
+
+* An index consists of
+    1. Index name
+    2. Index mapping
+    3. Index setting
+
+* Index mapping : Mapping defines how documents and their fields are indexed and stored. It's like a schema in a relational database. Specifies things like:
+    1. Data type
+    2. Analyzer i.e.how fields are analyzed (tokenized and filtered)
+
+```
+"mappings":{
+        
+        "properties":{
+            "Question": {"type": "text"},
+            "Answer": {"type": "text"},
+            "Question Type":{"type": "keyword"},
+            "id": {"type": "keyword"},
+            "question_answer_vector": {
+                "type": "dense_vector",
+                "dims": 768,
+                "index": True,
+                "similarity": "cosine"
+            }
+        }
+    }
+
+```
+
+* Types of query clauses
+    1. Leaf query clauses : Leaf query clauses look for a particular value in a particular field, such as the match, term or range queries. These queries can be used by themselves
+    2. Compound query clauses : Compound query clauses wrap other leaf or compound queries and are used to combine multiple queries in a logical fashion
+
+* In Leaf Query clauses we have
+    1. Full Text Query : For searching text. Includes simple_query_string, match, multi_match
+    2. Vector Query
+
+
+
+* Errors
+    * elasticsearch.BadRequestError: BadRequestError(400, 'media_type_header_exception', 'Invalid media-type value on headers [Content-Type, Accept]', Accept version must be either version 8 or 7, but found 9. Accept=application/vnd.elasticsearch+json; compatible-with=9) : Reason : elastic search version on docker was (8.15.0) but the Python client installed was 9.0.2. Hence did poetry add elasticsearch==8.15.0
+```
+poetry add elasticsearch
+poetry remove elasticsearch
+poetry add elasticsearch=8.15.0
+
+```
+    * ValueError: Invalid pattern: '**' can only be an entire path component . Reason : rror is likely due to a change in datasets package (somewhere between 2.1 to 2.14) is breaking fsspec. Hence pip install -u datasets
+    * elasticsearch.BadRequestError: BadRequestError(400, 'parsing_exception', 'unknown query [query]') Reason : The query template was incorrect, with an additional layer of 'query'
+    
+```  
+keyword_query = {
+    "query": {
+        "simple_query_string":{
+            "query": None,
+            "fields":["Question", "Answer"],
+        }
+    }
+}
+
+# Incorrect : Since we already have query in our query template, no need of putting again while passing to body as argument
+keyword_results = client.search(index="medical-questions",
+        body={
+            'query':keyword_query,
+            'size':5
+        })['hits']['hits']
+
+
+# Correct
+keyword_results = client.search(index="medical-questions",
+        body=keyword_query, size=5)['hits']['hits']
+
+```
+    * elasticsearch.BadRequestError: BadRequestError(400, 'parsing_exception', "[match] query doesn't support multiple fields, found [query] and [fields]")
+    * DeprecationWarning: Received 'size' via a specific parameter in the presence of a 'body' parameter, which is deprecated and will be removed in a future version. Instead, use only 'body' or only specific parameters.
+
+### Doubts
+1. What is query language and query dsl?
+
+
+### References
+1. https://www.elastic.co/docs/reference/elasticsearch/clients/python/connecting
+2. https://www.elastic.co/docs/manage-data/data-store/text-analysis/anatomy-of-an-analyzer#_character_filters
+3. https://stackoverflow.com/questions/51807333/what-is-analyzer-in-elasticsearch-for
+4. https://stackoverflow.com/questions/77671277/valueerror-invalid-pattern-can-only-be-an-entire-path-component
+5. https://www.pinecone.io/learn/series/nlp/sentence-embeddings/
+6. https://www.reddit.com/r/LocalLLaMA/comments/1fdmoxl/open_source_alternatives_to_elastic_searchs_elser/
+7. https://www.elastic.co/docs/manage-data/data-store/templates#create-index-templates
+8. https://huggingface.co/datasets/keivalya/MedQuad-MedicalQnADataset
+9. https://www.elastic.co/docs/api/doc/elasticsearch/authentication
+10. https://www.elastic.co/docs/reference/elasticsearch/mapping-reference/mapping-parameters
+11. https://kshitijkutumbe.medium.com/blog-4-elasticsearch-query-deep-dive-text-keyword-and-vector-searches-with-python-e42586003abd
+12. https://stackoverflow.com/questions/62324903/elasticsearch-parsing-exception-400
+13. https://www.elastic.co/docs/reference/query-languages/query-dsl/full-text-queries
+14. https://www.elastic.co/docs/explore-analyze/query-filter/languages/querydsl
+15. https://www.youtube.com/watch?v=poERWnPrscc&list=PLGZAAioH7ZlMQGCt8GeAaJLvgehhq-gEK&index=1
+16. https://github.com/elastic/elasticsearch-labs/blob/main/notebooks/search/02-hybrid-search.ipynb
+17. https://www.elastic.co/docs/solutions/search/vector
+
+## To Do
+1. Transformer from scratch : https://github.com/aladdinpersson/Machine-Learning-Collection/blob/master/ML/Pytorch/more_advanced/transformer_from_scratch/transformer_from_scratch.py (https://www.youtube.com/watch?v=U0s0f995w14)
+2. Langraph Agent : https://github.com/schmitech/ai-driven-order-management
