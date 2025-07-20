@@ -2144,7 +2144,7 @@ if prompt := st.chat_input("Ask a question..."):
 
 
 
-## Day 20
+## Day 20 and 21
 
 * Learnt fundamentals of ElasticSearch
 
@@ -2157,7 +2157,6 @@ if prompt := st.chat_input("Ask a question..."):
     2. Inverted Index creation
     3. Query processing 
     4. Relevance scoring (using BM25 algorithm to find similar docs)
-
 
 * Elasticsearch Analyzer : Wrapper around 3 functions
     * Character filter (add/modify/remove characters, for example remove html tags)
@@ -2172,7 +2171,7 @@ if prompt := st.chat_input("Ask a question..."):
 
 * Encoder-decoder model can be implemented using RNN, LSTM or Transformers. 
 
-* Transformers are indirect descendants of the previous RNN models. The problem with RNN was since entire input was compressed into a single context vector, it was an information bottleneck as we are trying to squeeze it all through a single connection. The attention mechanism provided a solution to the bottleneck issue.
+* Transformers are indirect descendants of the previous RNN models. The problem with RNN was since entire input was compressed into a single context vector, it was an information bottleneck as we are trying to squeeze it all through a single connection. The attention mechanism provided a solution to the bottleneck issue (check Vizuara LLM from scratch series for more depth)
 
 * Cross Encoder : Produces very accurate results for similarity scores. A cross-encoder processes both inputs jointly, allowing full attention between all tokens in both sequences.
 
@@ -2218,8 +2217,101 @@ if prompt := st.chat_input("Ask a question..."):
 
 * In Leaf Query clauses we have
     1. Full Text Query : For searching text. Includes simple_query_string, match, multi_match
-    2. Vector Query
+    2. Vector Query 
 
+* Below is the entire code to perform a keyword search in Elasticsearch. It involves the following steps
+    1. Initialize Elasticsearch client
+    2. Define index properties (using index template) and create index
+    3. Load json documents into index 
+    4. Define query properties (using query clause)
+    5. Query the index
+
+```
+### keyword_search.py
+
+import re
+import json
+
+from tqdm import tqdm
+from elasticsearch import Elasticsearch
+
+## Initialize Elasticsearch client
+client = Elasticsearch('http://localhost:9200')
+
+print(client.info())
+
+## Index Properties
+index_name = "medical-questions"
+
+index_template = {
+    "settings":{"number_of_shards":1},
+    "mappings":{
+        # Type of each field in the data : Question, Answer, etc
+        "properties":{
+            "Question": {"type": "text"},
+            "Answer": {"type": "text"},
+            "Question Type":{"type": "keyword"},
+            "id": {"type": "keyword"},
+            "question_answer_vector": {
+                "type": "dense_vector",
+                "dims": 768,
+                "index": True,
+                "similarity": "cosine"
+            }
+        }
+    }
+}
+
+## Create index
+if not client.indices.exists(index=index_name):
+    client.indices.create(index=index_name, body=index_template)
+
+all_indices = client.indices.get_alias(index='*')
+for index_name in all_indices:
+    print(index_name)
+
+## Load documents into index
+def index_documents():
+    with open("Medical-QA-100.json","r") as f:
+        document = json.load(f)
+
+    for doc in tqdm(document):
+        client.index(index=index_name, document=doc)
+
+
+## Query clause for querying Elasticsearch    
+keyword_query = {
+    "query": {
+        "simple_query_string":{
+            "query": None,
+            "fields":["Question", "Answer"],
+        }
+    }
+}
+
+## Execute search and get results
+def keyword_search(query):
+    keyword_query['query']['simple_query_string']['query'] = query
+    print(keyword_query)
+    keyword_results = client.search(index="medical-questions",
+        body=keyword_query, size=5)['hits']['hits']
+    
+    print([res['_source']['Question'] for res in keyword_results])
+    return(keyword_results)
+
+
+keyword_search("parasites")
+
+
+
+```
+* Reciprocal rank fusion (RRF) is a method for combining multiple result sets with different relevance indicators into a single result set. Implementation is as follows:
+    1. Assign Reciprocal Rank Scores: For each document in each ranked list, calculate its reciprocal rank (1 / rank).
+    2. Combine Scores:Sum the reciprocal rank scores for each document across all the input lists.
+    3. Re-rank: Sort the documents based on their combined scores, creating a new, unified ranked list. 
+
+
+* Embedding model is stored in ` C:\Users\dell\.cache\huggingface\hub\models--sentence-transformers--multi-qa-distilbert-cos-v1`
 
 
 * Errors
@@ -2258,6 +2350,20 @@ keyword_results = client.search(index="medical-questions",
 ```
     * elasticsearch.BadRequestError: BadRequestError(400, 'parsing_exception', "[match] query doesn't support multiple fields, found [query] and [fields]")
     * DeprecationWarning: Received 'size' via a specific parameter in the presence of a 'body' parameter, which is deprecated and will be removed in a future version. Instead, use only 'body' or only specific parameters.
+    * elasticsearch.BadRequestError: BadRequestError(400, 'parsing_exception', '[simple_query_string] malformed query, expected [END_OBJECT] but found [FIELD_NAME]')
+
+```
+## Wrong code
+keyword_query['query']['simple_query_string']['query'] = query
+keyword_query['query']['size'] = size
+
+## Correct code
+keyword_query['query']['simple_query_string']['query'] = query
+keyword_query['size'] = size
+
+
+```
+    * UserWarning: `huggingface_hub` cache-system uses symlinks by default to efficiently store duplicated files but your machine does not support them. Caching files will still work but in a degraded version that might require more space on your disk. This warning can be disabled by setting the `HF_HUB_DISABLE_SYMLINKS_WARNING` environment variable.
 
 ### Doubts
 1. What is query language and query dsl?
@@ -2282,6 +2388,198 @@ keyword_results = client.search(index="medical-questions",
 16. https://github.com/elastic/elasticsearch-labs/blob/main/notebooks/search/02-hybrid-search.ipynb
 17. https://www.elastic.co/docs/solutions/search/vector
 
+## Day 22
+
+* Requirement : Check number of records in json file from the Python interpreter
+```
+>>> f = open('Medical-QA.json')
+>>> z = json.load(f)
+>>> len(z)
+1000
+>>> f.close()
+```
+* Note : We need to open a file before we can read it using the json library
+
+* MD5 is deterministic and hence used for thinngs like file verification.
+
+* Mean Reciprocal Rank : Used to evaluate the performance of ranking systems (specially IR and Question Answering). Mean of the reciprocal ranks across all queries
+
+* Examples for computing Mean Reciprocal Rank
+```
+## Input list of relevance flag
+[[False, False, False, False, False], 
+[False, False, False, False, False], 
+[False, False, False, False, False], 
+[False, False, False, False, False], 
+[False, False, False, False, False], 
+[True, True, True, True, False]]
+
+MRR = (0 + 0 + 0 + 0 + 0 + (1/1)) / 6 = 0.1666
+
+[[False, False, False, False, False], 
+[False, False, False, False, False], 
+[False, False, False, False, False], 
+[False, False, False, False, False], 
+[False, False, False, False, False], 
+[True, True, True, True, False],
+[False, False, False, False, True]
+]
+
+MRR = (0 + 0 + 0 + 0 + 0 + (1/1) + (1/5)) / 7 = 0.1714
+```
+
+
+* Errors:
+    * ValueError: True is not in list. Reason : All values in list are False
+
+```
+## Old
+rank = relevance_list.index(True)
+return rank
+
+## New
+if True in relevance_list:
+    rank = relevance_list.index(True)
+    return rank
+
+return 0
+
+```
+    * ZeroDivisionError: float division by zero
+```
+## Old
+rank = relevance_list.index(True)
+reciprocal_rank = 1.0 / (rank)
+
+## New
+rank = relevance_list.index(True)
+reciprocal_rank = 1.0 / (rank + 1)
+```
+
+* TO DO : Add remaining code from repo to notes
+
+### Doubts
+1. Is MD5 algorithm deterministic i.e. eoes the MD5 algorithm always generate the same output for the same string?
+
+### References
+
+1. https://stackoverflow.com/questions/4354377/does-the-md5-algorithm-always-generate-the-same-output-for-the-same-string
+2. https://www.geeksforgeeks.org/python/python-handling-no-element-found-in-index/
+3. https://stackoverflow.com/questions/522372/finding-first-and-last-index-of-some-value-in-a-list-in-python
+
+
+
+## Day 23 and 24 (To Complete)
+* Requirement : Finetune OpenAI model on Customer support data and evaluate the fine tuning
+
+* Summarize all learning and youtube video as well
+
+* An important an initially challenging part for finetuning and evaluating data is preparing the data in the right format.
+
+* Dataset preparation
+    * For Finetuning : Use the chat completions format, and have it in jsonl
+    ```
+    {"messages": 
+        [
+            {"role": "system", "content": "You are a helpful assistant"}, 
+            {"role": "user", "content": "My order hasn't arrived yet."}, 
+            {"role": "assistant", "content": "We apologize for the inconvenience. Can you please provide your order number so we can investigate?"}
+        ]
+    }
+
+    ```
+
+    * For Evaluation : Input and output
+    ```
+    {"prompt":"WhatisthecapitalofFrance?", "completion":"Paris"}
+
+
+    ```
+
+* 4 core concepts in LLM evaluation
+    * Dataset :
+    * Evaluator :
+    * Task : 
+    * Interpretation : Understanding and analyzing evaluation outcomes
+
+* To run evaluation from UI : https://platform.openai.com/evaluations
+
+* If you want to dump the JSON into a file/socket or whatever, then you should go with dump(). If you only need it as a string (for printing, parsing or whatever) then use dumps() (dump string)
+
+* An eval needs two key ingredients:
+    * data_source_config: A schema for the test data you will use along with the eval.
+    * testing_criteria: The graders that determine if the model output is correct.
+
+*  BLEU looks at how many words and phrases (n-grams) in the machine translation match the human translations. The more matches and the closer the length, the higher the BLEU score.
+
+* Errors
+    * openai.OpenAIError: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable.Reason : In .env it was OPEN_API_KEy instead of OPENAI_API_KEY
+    * Training file has 3 examples, must atleast have 10
+
+### Doubts
+1. What is differece between `json.dump` and `json.dumps`?
+2. What is difference between system and devloper role?
+
+### References
+1. https://stackoverflow.com/questions/36059194/what-is-the-difference-between-json-dump-and-json-dumps-in-python
+2. https://platform.openai.com/docs/guides/graders#text-similarity-graders
+3. https://www.youtube.com/watch?v=pgyhq-WagIg (Manny Bernabe)
+4. https://community.openai.com/t/system-vs-developer-role-in-4o-model/1119179/2
+5. https://platform.openai.com/docs/guides/supervised-fine-tuning
+6. https://platform.openai.com/docs/guides/evals
+
+
+## Day 25
+
+* Requirement : Creating a Telegram bot using n8n hosted locally using Docker
+
+* Ngrok : To serve local system to Internet, Ngrok provide a tunnel b/w Internet and local machine. Ngrok connects to the internet by establishing a secure, persistent tunnel between local machine and the ngrok cloud service. This tunnel allows you to expose local applications, like a web server, to the internet through a public URL provided by ngrok. When someone accesses that public URL, ngrok forwards the traffic through the secure tunnel to your local application. 
+
+* We need Ngrok so that Telegram API can access our workflow. Else it can access our locally hosted workflow
+
+* Steps to create a Telegram bot using N8N locally
+    1. Create a Telegram Bot using BotFather in Telegram
+    2. Create an account in Ngrok
+    3. In Ngrok, in Setup and Installation, under Deploy your app online, select Static Domain to create a static url
+    4. Create a .env file replacing `DOMAIN_NAME` and `SUBDOMAIN` with the domain and sub-domain obtained from Ngrok (in step 3)
+    5. Go to a folder (n8n-project) where you want to store project files. Within that folder, create another folder called `local-files`
+    6. In the main folder, create a compose.yml file with the configuration from 3rd link in reference
+    7. Start Docker Compose using `docker compose up -d`
+    8. Start Ngrok server using Docker with the command from Ngrok site `docker run --net=host -it -e NGROK_AUTHTOKEN=<AUTH-TOKEN> ngrok/ngrok:latest http --url=your-url.ngrok-free.app 5678`
+    9. Open the Ngrok website in browser `your-url.ngrok-free.app`
+    10. Start new workflow
+    11. Add Telegram trigger. Use the credentials obtained from step 1
+    12. Add OpenAI message a model step
+    13. Add Telegram Send a Text Message step
+    14. Make the workflow active
+
+* N8N (node-based no-code) : Lowcode/nocode workflow automation tool. Similar to Power Automate
+
+* Important n8n concepts
+    * Nodes : Basic building block. Each node represents some operation/some action (like sending message to Telegram, calling OpenAI api, etc)
+    * Trigger node : Special node responsible for starting the workflow in response to certain event (eg. Telegram trigger node)
+    * Action node : Represent specific tasks within a workflow (eg. calling OpenAI api node)
+    * Connection : Link between 2 nodes, passed data from one node to another
+    * Execution : Single run of a workflow. 2 modes
+        * Manual : We have to run flow manually. Used during dev and testing
+        * Production : Flow runs automatically. Used in prod. For this we must set the workflow to Active
+    
+
+* Errors:
+    * Telegram Trigger: Bad Request: bad webhook: An HTTPS URL must be provided for webhook. Solution : Use Ngrok
+
+### Doubts
+1. Why do we need to use Ngrok when we setup n8n locally, if we want to use the Telegram node (Send a message)?
+
+### References
+1. https://www.youtube.com/watch?v=azNX3bu0pwE
+2. https://www.youtube.com/watch?v=_nMkQaguy3E
+3. https://community.n8n.io/t/telegram-trigger-behind-swag-proxy-bad-request-bad-webhook-https-url-must-be-provided-for-webhook/7122/15
+4. https://community.n8n.io/t/telegram-node-seperating-text-and-photos-in-different-workflows/70658/2
+5. https://www.youtube.com/watch?v=HPEduQTSdT8
+
 ## To Do
 1. Transformer from scratch : https://github.com/aladdinpersson/Machine-Learning-Collection/blob/master/ML/Pytorch/more_advanced/transformer_from_scratch/transformer_from_scratch.py (https://www.youtube.com/watch?v=U0s0f995w14)
 2. Langraph Agent : https://github.com/schmitech/ai-driven-order-management
+3. Langraph Crew AI : https://github.com/crewAIInc/crewAI-examples/tree/main/CrewAI-LangGraph
+
